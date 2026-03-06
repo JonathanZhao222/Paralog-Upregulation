@@ -1,0 +1,14 @@
+# Large data files
+data/raw/
+*.h5ad
+*.xlsx
+
+# Python environment
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# macOS
+.DS_Store
