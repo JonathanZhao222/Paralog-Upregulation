@@ -1,29 +1,53 @@
 """
 00_download_data.py
 -------------------
-Downloads the Replogle et al. 2022 K562 genome-wide Perturb-seq
-normalized pseudobulk dataset from Figshare (article 20029387).
+Downloads Perturb-seq normalized pseudobulk datasets.
 
-File downloaded:
-    K562_gwps_normalized_bulk_01.h5ad
-    - One row per perturbation (pseudobulk-aggregated)
-    - Expression values are gemgroup z-normalised
-    - ~10,000 CRISPRi perturbations + non-targeting controls
+Sources
+~~~~~~~
+  Replogle 2022 (Figshare 20029387) — pseudobulk, ready to use directly:
+    K562_gwps_normalized_bulk_01.h5ad       K562 genome-wide (~357 MB)
+    K562_essential_normalized_bulk_01.h5ad  K562 essential genes (~80 MB)
+    rpe1_normalized_bulk_01.h5ad            RPE1 near-diploid (~91 MB)
+
+  X-Atlas/Orion 2025 (Figshare 29190726) — single-cell, needs preprocessing:
+    HCT116_filtered_dual_guide_cells.h5ad   HCT116 colorectal cancer
+    HEK293T_filtered_dual_guide_cells.h5ad  HEK293T kidney
+    → Run 05_preprocess_xatlas.py after downloading these.
 
 Usage:
-    python scripts/00_download_data.py
+    # Download Replogle datasets only (fast, ready to use)
+    python scripts/00_download_data.py --replogle
+
+    # Download X-Atlas datasets only (large single-cell files)
+    python scripts/00_download_data.py --xatlas
+
+    # Download everything
+    python scripts/00_download_data.py --all
 """
 
+import argparse
 import sys
 import requests
 from pathlib import Path
 from tqdm import tqdm
 
 # ── Config ────────────────────────────────────────────────────────────────────
-FIGSHARE_ARTICLE_ID = 20029387
-TARGET_FILENAME = "K562_gwps_normalized_bulk_01.h5ad"
-DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
+DATA_DIR   = Path(__file__).resolve().parent.parent / "data" / "raw"
 CHUNK_SIZE = 1 << 20  # 1 MB chunks
+
+REPLOGLE_ARTICLE_ID = 20029387
+REPLOGLE_TARGETS = [
+    "K562_gwps_normalized_bulk_01.h5ad",
+    "K562_essential_raw_bulk_01.h5ad",   # no normalized_bulk exists; we z-score in preprocessing
+    "rpe1_normalized_bulk_01.h5ad",
+]
+
+XATLAS_ARTICLE_ID = 29190726
+XATLAS_TARGETS = [
+    "HCT116_filtered_dual_guide_cells.h5ad",
+    "HEK293T_filtered_dual_guide_cells.h5ad",
+]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -47,38 +71,58 @@ def stream_download(url: str, dest: Path) -> None:
             bar.update(len(chunk))
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
-def main() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    dest = DATA_DIR / TARGET_FILENAME
-
-    if dest.exists():
-        print(f"[skip] {TARGET_FILENAME} already exists at:\n  {dest}")
-        return
-
-    print(f"Querying Figshare article {FIGSHARE_ARTICLE_ID} ...")
+def download_from_article(article_id: int, targets: list[str]) -> None:
+    print(f"Querying Figshare article {article_id} ...")
     try:
-        files = list_figshare_files(FIGSHARE_ARTICLE_ID)
+        files = list_figshare_files(article_id)
     except requests.HTTPError as e:
         print(f"ERROR fetching file list: {e}")
         sys.exit(1)
 
+    available = {f["name"]: f for f in files}
     print("\nAvailable files in article:")
     for f in files:
-        print(f"  {f['name']:<55s}  {f['size'] / 1e9:.2f} GB")
+        print(f"  {f['name']:<60s}  {f['size'] / 1e9:.2f} GB")
+    print()
 
-    target = next((f for f in files if f["name"] == TARGET_FILENAME), None)
-    if target is None:
-        print(f"\nERROR: '{TARGET_FILENAME}' not found in the article.")
-        print("Check the filename against the list above and update TARGET_FILENAME.")
-        sys.exit(1)
+    for target_name in targets:
+        dest = DATA_DIR / target_name
+        if dest.exists():
+            print(f"[skip] {target_name} already exists.")
+            continue
+        if target_name not in available:
+            print(f"[warn] '{target_name}' not found in article — skipping.")
+            continue
+        f = available[target_name]
+        print(f"Downloading {target_name} ({f['size'] / 1e9:.2f} GB) ...")
+        stream_download(f["download_url"], dest)
+        print(f"  Saved to {dest}\n")
 
-    size_gb = target["size"] / 1e9
-    print(f"\nDownloading {TARGET_FILENAME} ({size_gb:.2f} GB) ...")
-    print(f"Destination: {dest}\n")
 
-    stream_download(target["download_url"], dest)
-    print(f"\nDownload complete. Saved to:\n  {dest}")
+# ── Main ──────────────────────────────────────────────────────────────────────
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--replogle", action="store_true",
+                       help="Download Replogle 2022 pseudobulk files (fast, ready to use)")
+    group.add_argument("--xatlas", action="store_true",
+                       help="Download X-Atlas/Orion single-cell files (large, needs preprocessing)")
+    group.add_argument("--all", action="store_true",
+                       help="Download all files from both sources")
+    args = parser.parse_args()
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    if args.replogle or args.all:
+        print("=== Replogle 2022 ===")
+        download_from_article(REPLOGLE_ARTICLE_ID, REPLOGLE_TARGETS)
+
+    if args.xatlas or args.all:
+        print("=== X-Atlas/Orion 2025 ===")
+        download_from_article(XATLAS_ARTICLE_ID, XATLAS_TARGETS)
+        print("NOTE: Run 'python scripts/05_preprocess_xatlas.py' next to convert to pseudobulk.")
+
+    print("Done.")
 
 
 if __name__ == "__main__":
