@@ -54,16 +54,11 @@ else
 fi
 conda activate "$ENV_NAME"
 
-# Install dependencies via conda for compiled packages (avoids BLAS issues)
-echo "  Installing dependencies ..."
+# Install ALL dependencies via conda-forge (avoids BLAS/compilation issues)
+echo "  Installing dependencies via conda ..."
 conda install -y -c conda-forge \
-    numpy scipy pandas matplotlib seaborn tqdm openpyxl anndata \
-    2>/dev/null || true
-
-# Remaining packages via pip
-pip install -q -r "$PROJECT_DIR/requirements.txt" \
-    --no-deps 2>/dev/null || \
-pip install -q -r "$PROJECT_DIR/requirements.txt"
+    numpy scipy pandas matplotlib seaborn tqdm openpyxl \
+    anndata h5py hdf5 natsort packaging
 
 echo "  Dependencies installed."
 
