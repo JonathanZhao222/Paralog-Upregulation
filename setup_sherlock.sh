@@ -30,7 +30,8 @@ else
     echo "[1/5] Installing Miniconda to $CONDA_DIR ..."
     if [ ! -d "$CONDA_DIR" ]; then
         INSTALLER="$SCRATCH_DIR/miniconda_installer.sh"
-        wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
+        # Use py310_23.3.1 — last release compatible with GLIBC 2.17
+        wget -q https://repo.anaconda.com/miniconda/Miniconda3-py310_23.3.1-0-Linux-x86_64.sh \
              -O "$INSTALLER"
         bash "$INSTALLER" -b -p "$CONDA_DIR"
         rm "$INSTALLER"
