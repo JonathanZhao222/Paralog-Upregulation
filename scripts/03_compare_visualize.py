@@ -59,10 +59,21 @@ def load(cell_line: str) -> tuple[pd.DataFrame, pd.DataFrame]:
             )
 
     sig    = pd.read_csv(sig_path)
-    nonsig = pd.read_csv(ns_path)
+    try:
+        nonsig = pd.read_csv(ns_path)
+    except Exception:
+        nonsig = pd.DataFrame(columns=["delta_z", "mean_identical_score",
+                                        "dep_gene", "paralog_gene"])
 
     sig    = sig[sig["testable"] == True].dropna(subset=["delta_z"]).copy()
     nonsig = nonsig.dropna(subset=["delta_z"]).copy()
+
+    if len(sig) == 0:
+        raise ValueError(
+            f"[{cell_line}] No testable significant pairs found.\n"
+            "The screen may not cover the dep_genes in sig_37_paralog.xlsx.\n"
+            "Check that the h5ad gene names match the paralog list (gene symbols)."
+        )
 
     sig["group"]    = "Significant"
     nonsig["group"] = "Non-significant"
@@ -244,7 +255,8 @@ def run(cell_line: str) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     # Kept in sync with CELL_LINE_FILES in 02_compute_delta_z.py
-    available = ["K562", "K562_essential", "rpe1", "HCT116", "HEK293T"]
+    available = ["K562", "K562_essential", "rpe1", "HCT116", "HEK293T", "melanoma",
+                 "cd4t_rest", "cd4t_stim8hr", "cd4t_stim48hr"]
 
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group(required=True)

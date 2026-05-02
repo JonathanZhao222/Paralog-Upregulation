@@ -5,98 +5,82 @@
 # Usage: bash setup_sherlock.sh
 #
 # What it does:
-#   1. Installs Miniconda in $SCRATCH if conda not available
-#   2. Creates a conda env with Python 3.11 + all dependencies
-#   3. Downloads data (Replogle K562_essential if not present)
+#   1. Loads Sherlock's system Python module (no GLIBC issues)
+#   2. Creates a venv with all dependencies installed via pip
+#   3. Downloads Replogle data if not present
 #   4. Preprocesses, computes delta_z, generates figures
 #   5. Prints rsync command to copy results back to your laptop
 
 set -e  # exit on error
 
+# Guard: must be run on Sherlock, not locally
+if ! command -v module &>/dev/null; then
+    echo "ERROR: 'module' command not found."
+    echo "This script must be run on Sherlock, not your local machine."
+    echo ""
+    echo "Steps:"
+    echo "  1. rsync this script to Sherlock (run on your Mac):"
+    echo "     rsync -avz \"/Users/jonathanzhao/Desktop/Sheltzer Lab/Paralog Upregulation/\" \\"
+    echo "       jzhao222@sherlock.stanford.edu:~/paralog_upregulation/"
+    echo "  2. SSH in and run:"
+    echo "     ssh jzhao222@sherlock.stanford.edu"
+    echo "     cd ~/paralog_upregulation && bash setup_sherlock.sh"
+    exit 1
+fi
+
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRATCH_DIR="${SCRATCH:-$HOME/scratch}"
-CONDA_DIR="$SCRATCH_DIR/miniconda3"
-ENV_NAME="paralog"
+VENV_DIR="${SCRATCH:-$HOME/scratch}/paralog_venv"
 
 echo "======================================================"
 echo "  Paralog Upregulation — Sherlock Setup"
 echo "  Project: $PROJECT_DIR"
 echo "======================================================"
 
-# ── Step 1: Get conda ─────────────────────────────────────────────────────────
-if command -v conda &>/dev/null; then
-    echo "[1/5] conda already available: $(conda --version)"
-else
-    echo "[1/5] Installing Miniconda to $CONDA_DIR ..."
-    if [ ! -d "$CONDA_DIR" ]; then
-        INSTALLER="$SCRATCH_DIR/miniconda_installer.sh"
-        # Use py310_23.3.1 — last release compatible with GLIBC 2.17
-        wget -q https://repo.anaconda.com/miniconda/Miniconda3-py310_23.3.1-0-Linux-x86_64.sh \
-             -O "$INSTALLER"
-        bash "$INSTALLER" -b -p "$CONDA_DIR"
-        rm "$INSTALLER"
-    fi
-    source "$CONDA_DIR/bin/activate"
-    echo "  Miniconda installed."
-fi
+# ── Step 1: Load Python and create venv ──────────────────────────────────────
+echo "[1/4] Loading Python module ..."
+module load python/3.12.1
 
-# Make conda available in this shell
-if [ -f "$CONDA_DIR/bin/activate" ]; then
-    source "$CONDA_DIR/bin/activate"
-fi
+echo "  Python: $(python3 --version)"
+echo "  Creating venv at $VENV_DIR ..."
+python3 -m venv "$VENV_DIR"
+source "$VENV_DIR/bin/activate"
+echo "  Venv active: $(which python3)"
 
-# ── Step 2: Create / activate environment ────────────────────────────────────
-echo "[2/5] Setting up conda environment '$ENV_NAME' ..."
-if conda env list | grep -q "^$ENV_NAME "; then
-    echo "  Environment already exists, activating."
-else
-    conda create -n "$ENV_NAME" python=3.11 -y
-fi
-conda activate "$ENV_NAME"
-
-# Install ALL dependencies via conda-forge (avoids BLAS/compilation issues)
-echo "  Installing dependencies via conda ..."
-conda install -y -c conda-forge \
-    numpy scipy pandas matplotlib seaborn tqdm openpyxl \
-    anndata h5py hdf5 natsort packaging
-
+echo "  Installing dependencies via pip ..."
+pip install --quiet --upgrade pip
+# numpy must be installed first — pandas needs it at build time
+pip install --quiet --prefer-binary numpy
+pip install --quiet --prefer-binary \
+    scipy pandas matplotlib seaborn tqdm openpyxl \
+    anndata mygene natsort packaging requests
 echo "  Dependencies installed."
 
-# ── Step 3: Download data ─────────────────────────────────────────────────────
-echo "[3/5] Downloading data ..."
+# ── Step 2: Download data ─────────────────────────────────────────────────────
+echo "[2/4] Downloading Replogle data ..."
 cd "$PROJECT_DIR"
-python scripts/00_download_data.py --replogle
+python3 scripts/00_download_data.py --replogle
 
-# Download X-Atlas only if explicitly requested (large files)
-if [ "${DOWNLOAD_XATLAS:-0}" = "1" ]; then
-    echo "  Downloading X-Atlas (warning: ~560 GB) ..."
-    python scripts/00_download_data.py --xatlas
-    echo "  Preprocessing X-Atlas single-cell data ..."
-    python scripts/05_preprocess.py --all
-fi
-
-# ── Step 4: Preprocess K562_essential ────────────────────────────────────────
-echo "[4/5] Preprocessing K562_essential ..."
-python scripts/05_preprocess.py --cell-line K562_essential
-
-# ── Step 5: Run full analysis ─────────────────────────────────────────────────
-echo "[5/5] Running analysis ..."
-python scripts/02_compute_delta_z.py --all
-python scripts/03_compare_visualize.py --all
-python scripts/04_cross_cell_line.py
+# ── Step 3: Run full analysis (Replogle cell lines) ───────────────────────────
+echo "[3/4] Running analysis on Replogle cell lines ..."
+python3 scripts/02_compute_delta_z.py --all
+python3 scripts/03_compare_visualize.py --all
+python3 scripts/04_cross_cell_line.py
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "======================================================"
-echo "  Analysis complete!"
+echo "  Setup complete!"
 echo "  Results: $PROJECT_DIR/results/"
 echo "  Figures: $PROJECT_DIR/figures/"
 echo ""
 echo "  To copy results back to your laptop, run this"
 echo "  command ON YOUR LOCAL MACHINE:"
 echo ""
-echo "  rsync -avz ${USER}@sherlock.stanford.edu:'$PROJECT_DIR/results/' \\"
+echo "  rsync -avz jzhao222@sherlock.stanford.edu:'$PROJECT_DIR/results/' \\"
 echo "    \"/Users/jonathanzhao/Desktop/Sheltzer Lab/Paralog Upregulation/results/\""
-echo "  rsync -avz ${USER}@sherlock.stanford.edu:'$PROJECT_DIR/figures/' \\"
+echo "  rsync -avz jzhao222@sherlock.stanford.edu:'$PROJECT_DIR/figures/' \\"
 echo "    \"/Users/jonathanzhao/Desktop/Sheltzer Lab/Paralog Upregulation/figures/\""
+echo ""
+echo "  To run the CD4+ T cell analysis (primary immune cells, 44.6 GB):"
+echo "  sbatch run_cd4t_sherlock.sbatch"
 echo "======================================================"

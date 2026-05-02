@@ -27,7 +27,8 @@ ROOT        = Path(__file__).resolve().parent.parent
 FIGURES_DIR = ROOT / "figures" / "cross_cell_line"
 
 # Cell lines to compare — add more here as data becomes available
-CELL_LINES = ["K562", "K562_essential", "rpe1", "HCT116", "HEK293T"]
+CELL_LINES = ["K562", "K562_essential", "rpe1", "HCT116", "HEK293T", "melanoma",
+              "cd4t_rest", "cd4t_stim8hr", "cd4t_stim48hr"]
 
 sns.set_theme(style="ticks", font_scale=1.1)
 plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42})
