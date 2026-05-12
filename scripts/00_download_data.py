@@ -81,6 +81,14 @@ CD4T_S3_URL = (
     "https://genome-scale-tcell-perturb-seq.s3.amazonaws.com"
     "/marson2025_data/GWCD4i.pseudobulk_merged.h5ad"
 )
+
+# PerturBase — CRISPRi Perturb-seq in iPSC-derived neurons (Tian et al. 2021, GSE152988)
+# "Genome-wide CRISPRi/a screens in human neurons link lysosomal failure to ferroptosis"
+# 185 perturbations, 32 300 cells, 33 538 genes
+NEURON_PERTURBASE_URL = (
+    "http://www.perturbase.cn/static/CRISPRi/CRISPRi.raw.tar.gz"
+)
+NEURON_FILENAME = "neuron_raw.h5ad"
 CD4T_FILENAME = "GWCD4i.pseudobulk_merged.h5ad"
 
 
@@ -162,6 +170,8 @@ def main() -> None:
                        help="Download GSE291147 melanoma CRISPRi Perturb-seq files from GEO")
     group.add_argument("--cd4t", action="store_true",
                        help="Download CD4+ T cell pseudobulk h5ad from S3 (44.6 GB — use on Sherlock)")
+    group.add_argument("--neuron", action="store_true",
+                       help="Download iPSC-derived neuron CRISPRi Perturb-seq from PerturBase (~266 MB)")
     group.add_argument("--all", action="store_true",
                        help="Download all files from all sources")
     args = parser.parse_args()
@@ -196,6 +206,26 @@ def main() -> None:
             stream_download(CD4T_S3_URL, dest)
             print(f"  Saved to {dest}")
         print("NOTE: Run 'python scripts/07_preprocess_cd4t.py' next to produce per-condition h5ad files.")
+
+    if args.neuron or args.all:
+        print("=== iPSC-derived neuron CRISPRi Perturb-seq (PerturBase / Tian et al. 2021) ===")
+        dest = DATA_DIR / NEURON_FILENAME
+        if dest.exists():
+            print(f"[skip] {NEURON_FILENAME} already exists.")
+        else:
+            import tarfile, io
+            print(f"Downloading CRISPRi.raw.tar.gz from PerturBase (~266 MB) ...")
+            print("  Note: PerturBase server is slow (~250 KB/s); expect ~18 min.")
+            tar_dest = DATA_DIR / "CRISPRi_neuron.raw.tar.gz"
+            stream_download(NEURON_PERTURBASE_URL, tar_dest)
+            print(f"  Extracting raw.h5ad → {NEURON_FILENAME} ...")
+            with tarfile.open(tar_dest) as tf:
+                member = tf.getmember("raw.h5ad")
+                member.name = NEURON_FILENAME
+                tf.extract(member, path=DATA_DIR)
+            tar_dest.unlink()
+            print(f"  Saved to {dest}")
+        print("NOTE: Run 'python scripts/08_preprocess_neuron.py' next to produce pseudobulk h5ad.")
 
     print("Done.")
 
