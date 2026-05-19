@@ -160,6 +160,19 @@ def run(cell_line: str) -> None:
     sig_rows = []
     for _, row in tqdm(sig.iterrows(), total=len(sig), desc="sig pairs"):
         dz = delta_z(pert_mean, gene_index, row["dep_gene"], row["paralog_gene"], ctrl_vec)
+
+        # Paralog expression level in control (z-score baseline; proxy for whether it is expressed)
+        j_para = gene_index.get(row["paralog_gene"])
+        paralog_ctrl_mean_z = float(ctrl_vec[j_para]) if j_para is not None else None
+
+        # Flipped direction: dep_gene expression when paralog_gene is knocked down
+        j_dep = gene_index.get(row["dep_gene"])
+        para_kd = row["paralog_gene"]
+        if para_kd in pert_mean and j_dep is not None:
+            dz_flipped = float(pert_mean[para_kd][j_dep] - ctrl_vec[j_dep])
+        else:
+            dz_flipped = None
+
         sig_rows.append({
             "dep_gene":             row["dep_gene"],
             "paralog_gene":         row["paralog_gene"],
@@ -170,6 +183,8 @@ def run(cell_line: str) -> None:
             "p_value_dep":          row["p_value"],
             "delta_z":              dz,
             "testable":             dz is not None,
+            "paralog_ctrl_mean_z":  paralog_ctrl_mean_z,
+            "delta_z_flipped":      dz_flipped,
         })
 
     sig_df = pd.DataFrame(sig_rows)
@@ -194,18 +209,22 @@ def run(cell_line: str) -> None:
 
         dz1 = delta_z(pert_mean, gene_index, g1, g2, ctrl_vec)
         if dz1 is not None:
+            j2 = gene_index.get(g2)
             nonsig_rows.append({
                 "dep_gene": g1, "paralog_gene": g2,
                 "mean_identical_score": mid_score,
                 "delta_z": dz1, "direction": "g1_to_g2",
+                "paralog_ctrl_mean_z": float(ctrl_vec[j2]) if j2 is not None else None,
             })
 
         dz2 = delta_z(pert_mean, gene_index, g2, g1, ctrl_vec)
         if dz2 is not None:
+            j1 = gene_index.get(g1)
             nonsig_rows.append({
                 "dep_gene": g2, "paralog_gene": g1,
                 "mean_identical_score": mid_score,
                 "delta_z": dz2, "direction": "g2_to_g1",
+                "paralog_ctrl_mean_z": float(ctrl_vec[j1]) if j1 is not None else None,
             })
 
     nonsig_df = pd.DataFrame(nonsig_rows)

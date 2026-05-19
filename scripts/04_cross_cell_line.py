@@ -148,6 +148,62 @@ def plot_heatmap(merged: pd.DataFrame, available_cls: list[str]) -> None:
     print(f"Saved {out}")
 
 
+# ── Figure 3 — pairwise correlation matrix ────────────────────────────────────
+def plot_correlation_matrix(merged: pd.DataFrame, available_cls: list[str]) -> None:
+    dz_cols = [f"delta_z_{cl}" for cl in available_cls if f"delta_z_{cl}" in merged.columns]
+    if len(dz_cols) < 2:
+        return
+
+    corr = merged[dz_cols].corr(method="pearson")
+    corr.index   = [c.replace("delta_z_", "") for c in corr.index]
+    corr.columns = [c.replace("delta_z_", "") for c in corr.columns]
+
+    # Count of jointly testable pairs for each off-diagonal cell
+    n_shared = pd.DataFrame(index=corr.index, columns=corr.columns, dtype=float)
+    cls = [c.replace("delta_z_", "") for c in dz_cols]
+    for i, ci in enumerate(cls):
+        for j, cj in enumerate(cls):
+            n = merged[[f"delta_z_{ci}", f"delta_z_{cj}"]].dropna().shape[0]
+            n_shared.loc[ci, cj] = n
+
+    fig, ax = plt.subplots(figsize=(max(6, len(dz_cols) * 0.9), max(5, len(dz_cols) * 0.9)))
+    sns.heatmap(corr.astype(float), ax=ax, cmap="RdBu_r", center=0,
+                vmin=-1, vmax=1, annot=True, fmt=".2f", linewidths=0.5,
+                linecolor="white", cbar_kws={"label": "Pearson r", "shrink": 0.7})
+    ax.set_title("Pairwise Δz correlation across cell lines\n"
+                 "(significant pairs, jointly testable)", fontsize=11)
+    plt.tight_layout()
+    out = FIGURES_DIR / "03_correlation_matrix.pdf"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close()
+    print(f"Saved {out}")
+
+    # Also print n_shared
+    print("\nJointly testable pair counts:")
+    print(n_shared.to_string())
+
+
+# ── Consistency score ─────────────────────────────────────────────────────────
+def compute_consistency(merged: pd.DataFrame, available_cls: list[str]) -> pd.DataFrame:
+    dz_cols = [f"delta_z_{cl}" for cl in available_cls if f"delta_z_{cl}" in merged.columns]
+    sub = merged[["dep_gene", "paralog_gene"] + dz_cols].copy()
+
+    sub["n_tested"]   = sub[dz_cols].notna().sum(axis=1)
+    sub["n_positive"] = (sub[dz_cols] > 0).sum(axis=1)
+    sub["frac_positive"] = sub["n_positive"] / sub["n_tested"].replace(0, np.nan)
+    sub["consistent_up"]   = (sub["n_positive"] == sub["n_tested"]) & (sub["n_tested"] >= 2)
+    sub["consistent_down"] = (sub["n_positive"] == 0) & (sub["n_tested"] >= 2)
+
+    out = ROOT / "results" / "cross_cell_line_consistency.csv"
+    sub.to_csv(out, index=False)
+    print(f"\nSaved consistency scores → {out}")
+
+    consistent = sub[sub["consistent_up"] | sub["consistent_down"]]
+    print(f"Pairs consistent across ALL tested cell lines (≥2): {len(consistent)}")
+    print(consistent[["dep_gene", "paralog_gene", "n_tested", "frac_positive"]].to_string())
+    return sub
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -160,6 +216,8 @@ def main() -> None:
 
     plot_scatter(merged, available_cls)
     plot_heatmap(merged, available_cls)
+    plot_correlation_matrix(merged, available_cls)
+    compute_consistency(merged, available_cls)
 
     out = ROOT / "results" / "cross_cell_line_delta_z.csv"
     merged.to_csv(out, index=False)

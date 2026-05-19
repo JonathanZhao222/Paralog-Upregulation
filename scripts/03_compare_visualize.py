@@ -68,17 +68,37 @@ def load(cell_line: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     sig    = sig[sig["testable"] == True].dropna(subset=["delta_z"]).copy()
     nonsig = nonsig.dropna(subset=["delta_z"]).copy()
 
+    return sig, nonsig
+
+
+def apply_expr_filter(sig: pd.DataFrame, nonsig: pd.DataFrame,
+                      cell_line: str, min_expr: float | None):
+    if min_expr is None or "paralog_ctrl_mean_z" not in sig.columns:
+        return sig, nonsig
+    before = len(sig)
+    sig = sig[sig["paralog_ctrl_mean_z"] >= min_expr].copy()
+    print(f"[{cell_line}] Expression filter (paralog_ctrl_mean_z ≥ {min_expr}): "
+          f"{len(sig)}/{before} sig pairs retained")
+    if "paralog_ctrl_mean_z" in nonsig.columns:
+        nonsig = nonsig[nonsig["paralog_ctrl_mean_z"] >= min_expr].copy()
+    return sig, nonsig
+
+
+def load_filtered(cell_line: str,
+                  min_expr: float | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    sig, nonsig = load(cell_line)
+    sig, nonsig = apply_expr_filter(sig, nonsig, cell_line, min_expr)
+
     if len(sig) == 0:
         raise ValueError(
-            f"[{cell_line}] No testable significant pairs found.\n"
+            f"[{cell_line}] No testable significant pairs found after filtering.\n"
             "The screen may not cover the dep_genes in sig_37_paralog.xlsx.\n"
             "Check that the h5ad gene names match the paralog list (gene symbols)."
         )
 
     sig["group"]    = "Significant"
     nonsig["group"] = "Non-significant"
-
-    print(f"[{cell_line}] Loaded: {len(sig)} testable sig pairs, {len(nonsig):,} non-sig directions")
+    print(f"[{cell_line}] {len(sig)} testable sig pairs, {len(nonsig):,} non-sig directions")
     return sig, nonsig
 
 
@@ -234,11 +254,11 @@ def plot_identity_scatter(sig: pd.DataFrame, figures_dir: Path) -> None:
 
 
 # ── Per-cell-line runner ──────────────────────────────────────────────────────
-def run(cell_line: str) -> None:
+def run(cell_line: str, min_expr: float | None = None) -> None:
     figures_dir = ROOT / "figures" / cell_line
     figures_dir.mkdir(parents=True, exist_ok=True)
 
-    sig, nonsig = load(cell_line)
+    sig, nonsig = load_filtered(cell_line, min_expr)
     stats = run_stats(sig, nonsig, cell_line)
 
     summary_path = ROOT / "results" / cell_line / "summary_comparison.csv"
@@ -256,7 +276,7 @@ def run(cell_line: str) -> None:
 def main() -> None:
     # Kept in sync with CELL_LINE_FILES in 02_compute_delta_z.py
     available = ["K562", "K562_essential", "rpe1", "HCT116", "HEK293T", "melanoma",
-                 "cd4t_rest", "cd4t_stim8hr", "cd4t_stim48hr"]
+                 "cd4t_rest", "cd4t_stim8hr", "cd4t_stim48hr", "neuron"]
 
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group(required=True)
@@ -264,6 +284,11 @@ def main() -> None:
                        help="Cell line to visualise")
     group.add_argument("--all", action="store_true",
                        help="Visualise all cell lines that have results")
+    parser.add_argument("--min-expr", type=float, default=None,
+                        metavar="THRESHOLD",
+                        help="Only include pairs where paralog_ctrl_mean_z ≥ THRESHOLD "
+                             "(filters lowly expressed paralogs; e.g. --min-expr -1.0). "
+                             "Requires re-running 02_compute_delta_z.py first.")
     args = parser.parse_args()
 
     if args.all:
@@ -276,7 +301,7 @@ def main() -> None:
 
     for cl in cell_lines:
         print(f"\n{'='*60}\n  Visualising: {cl}\n{'='*60}")
-        run(cl)
+        run(cl, min_expr=args.min_expr)
 
 
 if __name__ == "__main__":
