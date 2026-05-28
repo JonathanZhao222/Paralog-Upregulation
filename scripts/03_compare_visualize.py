@@ -163,10 +163,18 @@ def _pval_str(p: float) -> str:
 
 
 # ── Figures ───────────────────────────────────────────────────────────────────
+def _pval_stars(fdr: float) -> str:
+    if fdr < 0.01:  return "**"
+    if fdr < 0.05:  return "*"
+    return ""
+
+
 def plot_barplot(sig: pd.DataFrame, figures_dir: Path, cell_line: str) -> None:
     df = sig.sort_values("delta_z", ascending=False).reset_index(drop=True)
     colours = [COLOUR["Significant"] if v >= 0 else COLOUR["Non-significant"]
                for v in df["delta_z"]]
+
+    has_pval = "empirical_fdr" in df.columns
 
     fig, ax = plt.subplots(figsize=(13, 5))
     ax.bar(range(len(df)), df["delta_z"], color=colours,
@@ -180,11 +188,33 @@ def plot_barplot(sig: pd.DataFrame, figures_dir: Path, cell_line: str) -> None:
         f"Significant pairs (n={len(df)}), Replogle 2022 {cell_line}",
         fontsize=11,
     )
+
+    y_range = df["delta_z"].abs().max()
+    y_off   = y_range * 0.04
+
     for i, row in df.iterrows():
-        y_off = 0.04 if row["delta_z"] >= 0 else -0.04
-        va    = "bottom" if row["delta_z"] >= 0 else "top"
-        ax.text(i, row["delta_z"] + y_off, row["paralog_gene"],
-                ha="center", va=va, fontsize=6.5, rotation=90, color="black")
+        dz    = row["delta_z"]
+        above = dz >= 0
+
+        # Paralog gene label — inside/alongside bar
+        ax.text(i, dz + (y_off if above else -y_off), row["paralog_gene"],
+                ha="center", va="bottom" if above else "top",
+                fontsize=6.5, rotation=90, color="black")
+
+        # p-value placement:
+        #   positive bars → well above bar top (clears the rotated gene label)
+        #   negative bars → just above 0 line (avoids x-axis label area)
+        if has_pval and np.isfinite(row.get("empirical_fdr", np.nan)):
+            fdr   = row["empirical_fdr"]
+            praw  = row["empirical_pval"]
+            stars = _pval_stars(fdr)
+            label = stars if stars else f"p={praw:.2f}"
+            anchor_y = dz + y_off * 8 if above else y_off * 1.5
+            color    = "#d62728" if stars else "dimgrey"
+            ax.text(i, anchor_y, label,
+                    ha="center", va="bottom",
+                    fontsize=5.5, color=color,
+                    fontweight="bold" if stars else "normal")
 
     sns.despine(ax=ax)
     plt.tight_layout()
