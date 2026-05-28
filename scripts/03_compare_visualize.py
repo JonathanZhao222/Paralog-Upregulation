@@ -72,22 +72,42 @@ def load(cell_line: str) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def apply_expr_filter(sig: pd.DataFrame, nonsig: pd.DataFrame,
-                      cell_line: str, min_expr: float | None):
-    if min_expr is None or "paralog_ctrl_mean_z" not in sig.columns:
+                      cell_line: str, min_expr: float | None = None,
+                      min_expr_pct: float | None = None):
+    col = "paralog_ccle_log2tpm" if "paralog_ccle_log2tpm" in sig.columns \
+          else "paralog_ctrl_mean_z" if "paralog_ctrl_mean_z" in sig.columns \
+          else None
+
+    if min_expr_pct is not None:
+        if col is None or col not in nonsig.columns:
+            print(f"[{cell_line}] No expression column for percentile filter — skipping.")
+            return sig, nonsig
+        threshold = np.nanpercentile(nonsig[col].values, min_expr_pct)
+        print(f"[{cell_line}] Bottom {min_expr_pct:.0f}% cutoff: "
+              f"{col} = {threshold:.3f} log2TPM")
+        min_expr = threshold
+
+    if min_expr is None:
         return sig, nonsig
-    before = len(sig)
-    sig = sig[sig["paralog_ctrl_mean_z"] >= min_expr].copy()
-    print(f"[{cell_line}] Expression filter (paralog_ctrl_mean_z ≥ {min_expr}): "
-          f"{len(sig)}/{before} sig pairs retained")
-    if "paralog_ctrl_mean_z" in nonsig.columns:
-        nonsig = nonsig[nonsig["paralog_ctrl_mean_z"] >= min_expr].copy()
+    if col is None:
+        print(f"[{cell_line}] No expression column found — skipping filter.")
+        return sig, nonsig
+    before_sig = len(sig)
+    sig = sig[sig[col].fillna(-np.inf) >= min_expr].copy()
+    print(f"[{cell_line}] Expression filter ({col} ≥ {min_expr:.3f}): "
+          f"{len(sig)}/{before_sig} sig pairs retained")
+    if col in nonsig.columns:
+        before_ns = len(nonsig)
+        nonsig = nonsig[nonsig[col].fillna(-np.inf) >= min_expr].copy()
+        print(f"[{cell_line}]   non-sig: {len(nonsig):,}/{before_ns:,} retained")
     return sig, nonsig
 
 
 def load_filtered(cell_line: str,
-                  min_expr: float | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+                  min_expr: float | None = None,
+                  min_expr_pct: float | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     sig, nonsig = load(cell_line)
-    sig, nonsig = apply_expr_filter(sig, nonsig, cell_line, min_expr)
+    sig, nonsig = apply_expr_filter(sig, nonsig, cell_line, min_expr, min_expr_pct)
 
     if len(sig) == 0:
         raise ValueError(
@@ -254,11 +274,12 @@ def plot_identity_scatter(sig: pd.DataFrame, figures_dir: Path) -> None:
 
 
 # ── Per-cell-line runner ──────────────────────────────────────────────────────
-def run(cell_line: str, min_expr: float | None = None) -> None:
+def run(cell_line: str, min_expr: float | None = None,
+        min_expr_pct: float | None = None) -> None:
     figures_dir = ROOT / "figures" / cell_line
     figures_dir.mkdir(parents=True, exist_ok=True)
 
-    sig, nonsig = load_filtered(cell_line, min_expr)
+    sig, nonsig = load_filtered(cell_line, min_expr, min_expr_pct)
     stats = run_stats(sig, nonsig, cell_line)
 
     summary_path = ROOT / "results" / cell_line / "summary_comparison.csv"
@@ -286,9 +307,14 @@ def main() -> None:
                        help="Visualise all cell lines that have results")
     parser.add_argument("--min-expr", type=float, default=None,
                         metavar="THRESHOLD",
-                        help="Only include pairs where paralog_ctrl_mean_z ≥ THRESHOLD "
-                             "(filters lowly expressed paralogs; e.g. --min-expr -1.0). "
-                             "Requires re-running 02_compute_delta_z.py first.")
+                        help="Fixed log2TPM threshold; exclude pairs where paralog "
+                             "log2TPM < THRESHOLD (e.g. --min-expr 1.0).")
+    parser.add_argument("--min-expr-pct", type=float, default=None,
+                        metavar="PCT",
+                        help="Percentile-based filter: exclude pairs where the paralog "
+                             "falls in the bottom PCT%% of expression across non-sig pairs "
+                             "(e.g. --min-expr-pct 20 removes bottom 20%%). "
+                             "Requires paralog_ccle_log2tpm in results CSVs.")
     args = parser.parse_args()
 
     if args.all:
@@ -301,7 +327,7 @@ def main() -> None:
 
     for cl in cell_lines:
         print(f"\n{'='*60}\n  Visualising: {cl}\n{'='*60}")
-        run(cl, min_expr=args.min_expr)
+        run(cl, min_expr=args.min_expr, min_expr_pct=args.min_expr_pct)
 
 
 if __name__ == "__main__":

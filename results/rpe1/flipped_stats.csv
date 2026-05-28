@@ -1,0 +1,2 @@
+cell_line,n_pairs,n_reciprocal_up,n_reciprocal_down,n_asymmetric,mean_delta_z_flipped,ttest_flipped_gt0_p,pearson_r,pearson_p,mannwhitney_vs_nonsig_p
+rpe1,3,1,1,1,0.08768654481167544,0.34734927544237704,0.7838137883035559,0.4265433233228016,0.23492905784761312
