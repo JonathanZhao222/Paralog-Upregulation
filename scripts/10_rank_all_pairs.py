@@ -53,9 +53,14 @@ def run(cell_line: str) -> None:
     ns = pd.read_csv(ns_path).dropna(subset=["delta_z"]).copy()
     ns["group"] = "Non-significant background"
 
-    # Use only the columns present in both
+    # Use only the columns present in both; add p-value columns from sig if available
+    pval_cols = [c for c in ["empirical_pval", "empirical_fdr"] if c in sig.columns]
     shared_cols = ["dep_gene", "paralog_gene", "mean_identical_score", "delta_z", "group"]
-    combined = pd.concat([sig[shared_cols], ns[shared_cols]], ignore_index=True)
+    sig_out = sig[shared_cols + pval_cols].copy()
+    ns_out  = ns[shared_cols].copy()
+    for c in pval_cols:
+        ns_out[c] = float("nan")
+    combined = pd.concat([sig_out, ns_out], ignore_index=True)
     combined = combined.sort_values("delta_z", ascending=False).reset_index(drop=True)
     combined["rank"] = combined.index + 1
     combined["rank_pct"] = combined["rank"] / len(combined) * 100
