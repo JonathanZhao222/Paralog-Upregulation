@@ -47,11 +47,12 @@ CELL_LINE_FILES = {
     "cd4t_stim8hr":   "cd4t_stim8hr_pseudobulk_normalized.h5ad",
     "cd4t_stim48hr":  "cd4t_stim48hr_pseudobulk_normalized.h5ad",
     "neuron":         "neuron_pseudobulk_normalized.h5ad",
+    "iPSC":           "iPSC_KOLF2_pseudobulk_normalized.h5ad",
 }
 
 DIRECT_INDEX_CELL_LINES = {
     "K562_essential", "HCT116", "HEK293T", "melanoma",
-    "cd4t_rest", "cd4t_stim8hr", "cd4t_stim48hr", "neuron",
+    "cd4t_rest", "cd4t_stim8hr", "cd4t_stim48hr", "neuron", "iPSC",
 }
 
 

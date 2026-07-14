@@ -28,7 +28,7 @@ from scipy.stats import percentileofscore
 ROOT = Path(__file__).resolve().parent.parent
 
 CELL_LINES = ["K562", "K562_essential", "rpe1", "HCT116", "HEK293T", "melanoma",
-              "cd4t_rest", "cd4t_stim8hr", "cd4t_stim48hr", "neuron"]
+              "cd4t_rest", "cd4t_stim8hr", "cd4t_stim48hr", "neuron", "iPSC"]
 
 sns.set_theme(style="ticks", font_scale=1.1)
 plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42})

@@ -276,6 +276,64 @@ def main() -> None:
     plt.close()
     print(f"Saved → {out_fig}")
 
+    # ── Raw CN vs expression scatter (sig genes highlighted) ─────────────────
+    common_rna  = cn.index.intersection(rna.index)
+    common_prot = cn.index.intersection(prot.index)
+
+    CN_MAX = 10  # clip x-axis to diploid/mild amplification range
+    CN_BINS = np.linspace(0, CN_MAX, 12)
+    BIN_CENTRES = 0.5 * (CN_BINS[:-1] + CN_BINS[1:])
+
+    def bin_median(cn_vals, expr_vals, bins):
+        """Median expression per CN bin; NaN if fewer than 5 observations."""
+        meds = []
+        for lo, hi in zip(bins[:-1], bins[1:]):
+            mask = (cn_vals >= lo) & (cn_vals < hi)
+            meds.append(np.nanmedian(expr_vals[mask]) if mask.sum() >= 5 else np.nan)
+        return np.array(meds)
+
+    for label, other, common_cells, fname in [
+        ("RNA expression (log2 TPM)", rna,  common_rna,  "16_cn_vs_rna_scatter.pdf"),
+        ("Protein abundance",         prot, common_prot, "16_cn_vs_protein_scatter.pdf"),
+    ]:
+        cn_sub    = cn.loc[common_cells]
+        other_sub = other.loc[common_cells]
+
+        fig3, ax3 = plt.subplots(figsize=(8, 6))
+
+        # Non-sig background — median trend per bin across all non-sig genes
+        ns_genes_avail = list(ns_para & set(cn_sub.columns) & set(other_sub.columns))
+        ns_cn_all   = np.concatenate([cn_sub[g].values.astype(float)   for g in ns_genes_avail])
+        ns_expr_all = np.concatenate([other_sub[g].values.astype(float) for g in ns_genes_avail])
+        valid = np.isfinite(ns_cn_all) & np.isfinite(ns_expr_all) & (ns_cn_all <= CN_MAX)
+        ns_med = bin_median(ns_cn_all[valid], ns_expr_all[valid], CN_BINS)
+        ax3.plot(BIN_CENTRES, ns_med, color=COLOUR_NS, lw=2.5, ls="--",
+                 label=f"Non-sig median (n={len(ns_genes_avail):,} genes)", zorder=2)
+        ax3.fill_between(BIN_CENTRES, ns_med, alpha=0.12, color=COLOUR_NS, zorder=1)
+
+        # Sig genes — median trend per bin across all sig genes
+        sig_genes_avail = list(sig_para & set(cn_sub.columns) & set(other_sub.columns))
+        sig_cn_all   = np.concatenate([cn_sub[g].values.astype(float)   for g in sig_genes_avail])
+        sig_expr_all = np.concatenate([other_sub[g].values.astype(float) for g in sig_genes_avail])
+        valid_s = np.isfinite(sig_cn_all) & np.isfinite(sig_expr_all) & (sig_cn_all <= CN_MAX)
+        sig_med = bin_median(sig_cn_all[valid_s], sig_expr_all[valid_s], CN_BINS)
+        ax3.plot(BIN_CENTRES, sig_med, color=COLOUR_SIG, lw=2.5,
+                 label=f"Sig median (n={len(sig_genes_avail)} genes)", zorder=4)
+        ax3.fill_between(BIN_CENTRES, sig_med, alpha=0.15, color=COLOUR_SIG, zorder=3)
+
+        ax3.set_xlim(0, CN_MAX)
+        ax3.set_xlabel("Absolute copy number", fontsize=11)
+        ax3.set_ylabel(label, fontsize=11)
+        ax3.set_title(f"Copy number vs {label}\nacross CCLE cell lines  (CN ≤ {CN_MAX})",
+                      fontsize=11)
+        ax3.legend(fontsize=10, frameon=False)
+        sns.despine(ax=ax3)
+        plt.tight_layout()
+        out3 = fig_dir / fname
+        fig3.savefig(out3, bbox_inches="tight")
+        plt.close()
+        print(f"Saved → {out3}")
+
     # ── Per-gene scatter: CN-RNA vs CN-protein, coloured by group ────────────
     fig2, ax2 = plt.subplots(figsize=(8, 7))
     ns_sub  = result[result["group"] == "non-significant"].dropna(subset=["rna_pearson_r","protein_pearson_r"])
