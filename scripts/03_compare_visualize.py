@@ -240,9 +240,7 @@ def plot_violin(sig: pd.DataFrame, nonsig: pd.DataFrame, stats: dict,
     ax.scatter(np.zeros(len(sig)) + jitter, sig["delta_z"],
                color="black", s=18, zorder=5, alpha=0.7, linewidths=0)
 
-    ax.text(0.5, 1.02, f"Mann-Whitney U  {_pval_str(stats['mannwhitney_p'])}",
-            transform=ax.transAxes, ha="center", fontsize=10, style="italic")
-    ax.set_xlabel("")
+    ax.set_xlabel(f"Mann-Whitney U  {_pval_str(stats['mannwhitney_p'])}", fontsize=10, style="italic")
     ax.set_ylabel("Δz  (paralog z-score: KD − control)", fontsize=11)
     ax.set_title("Paralog upregulation: significant vs non-significant pairs", fontsize=11)
     sns.despine(ax=ax)
