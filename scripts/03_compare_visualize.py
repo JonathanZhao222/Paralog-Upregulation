@@ -46,12 +46,10 @@ plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42})
 COLOUR = {"Significant": "#d62728", "Non-significant": "#1f77b4"}
 ALPHA  = 0.85
 
-# Default expression floor applied when no --min-expr / --min-expr-pct flag is given.
-# Pairs where the paralog falls below the threshold are excluded from both sig and non-sig.
-DEFAULT_EXPR_FLOOR = {
-    "paralog_ccle_log2tpm": 1.0,   # log2(TPM+1) ≥ 1 → TPM ≥ 1 (CCLE cell lines)
-    "paralog_ctrl_mean_z":  -2.0,  # ≥ −2 SD from batch mean (non-CCLE cell lines)
-}
+# Cell lines that get an automatic expression floor (paralog_ctrl_mean_z ≥ −2)
+# when no --min-expr / --min-expr-pct flag is supplied.
+EXPR_FLOOR_CELL_LINES = {"iPSC"}
+EXPR_FLOOR_CTRL_Z     = -2.0
 
 
 # ── Load ──────────────────────────────────────────────────────────────────────
@@ -94,10 +92,12 @@ def apply_expr_filter(sig: pd.DataFrame, nonsig: pd.DataFrame,
               f"{col} = {threshold:.3f}")
         min_expr = threshold
 
-    # Apply default expression floor when no override was passed
-    if min_expr is None and min_expr_pct is None and col is not None:
-        min_expr = DEFAULT_EXPR_FLOOR.get(col)
-        if min_expr is not None:
+    # Apply default expression floor for designated cell lines when no override was passed
+    if min_expr is None and min_expr_pct is None and cell_line in EXPR_FLOOR_CELL_LINES:
+        col_z = "paralog_ctrl_mean_z"
+        if col_z in sig.columns:
+            col      = col_z
+            min_expr = EXPR_FLOOR_CTRL_Z
             print(f"[{cell_line}] Applying default expression floor: {col} ≥ {min_expr}")
 
     if min_expr is None:
