@@ -46,6 +46,13 @@ plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42})
 COLOUR = {"Significant": "#d62728", "Non-significant": "#1f77b4"}
 ALPHA  = 0.85
 
+# Default expression floor applied when no --min-expr / --min-expr-pct flag is given.
+# Pairs where the paralog falls below the threshold are excluded from both sig and non-sig.
+DEFAULT_EXPR_FLOOR = {
+    "paralog_ccle_log2tpm": 1.0,   # log2(TPM+1) ≥ 1 → TPM ≥ 1 (CCLE cell lines)
+    "paralog_ctrl_mean_z":  -2.0,  # ≥ −2 SD from batch mean (non-CCLE cell lines)
+}
+
 
 # ── Load ──────────────────────────────────────────────────────────────────────
 def load(cell_line: str) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -84,8 +91,14 @@ def apply_expr_filter(sig: pd.DataFrame, nonsig: pd.DataFrame,
             return sig, nonsig
         threshold = np.nanpercentile(nonsig[col].values, min_expr_pct)
         print(f"[{cell_line}] Bottom {min_expr_pct:.0f}% cutoff: "
-              f"{col} = {threshold:.3f} log2TPM")
+              f"{col} = {threshold:.3f}")
         min_expr = threshold
+
+    # Apply default expression floor when no override was passed
+    if min_expr is None and min_expr_pct is None and col is not None:
+        min_expr = DEFAULT_EXPR_FLOOR.get(col)
+        if min_expr is not None:
+            print(f"[{cell_line}] Applying default expression floor: {col} ≥ {min_expr}")
 
     if min_expr is None:
         return sig, nonsig

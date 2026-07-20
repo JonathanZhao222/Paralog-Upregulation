@@ -55,6 +55,29 @@ DIRECT_INDEX_CELL_LINES = {
     "cd4t_rest", "cd4t_stim8hr", "cd4t_stim48hr", "neuron", "iPSC",
 }
 
+# Expression floor: pairs whose paralog falls below the threshold are excluded.
+# Mirrors the default in 03_compare_visualize.py so both scripts are consistent.
+DEFAULT_EXPR_FLOOR = {
+    "paralog_ccle_log2tpm": 1.0,   # log2(TPM+1) ≥ 1 (CCLE cell lines)
+    "paralog_ctrl_mean_z":  -2.0,  # ≥ −2 SD from batch mean (non-CCLE cell lines)
+}
+
+
+def apply_expr_filter(df: pd.DataFrame, cell_line: str) -> pd.DataFrame:
+    col = "paralog_ccle_log2tpm" if "paralog_ccle_log2tpm" in df.columns \
+          else "paralog_ctrl_mean_z" if "paralog_ctrl_mean_z" in df.columns \
+          else None
+    if col is None:
+        return df
+    threshold = DEFAULT_EXPR_FLOOR.get(col)
+    if threshold is None:
+        return df
+    before = len(df)
+    df = df[df[col].fillna(-np.inf) >= threshold].copy()
+    print(f"[{cell_line}] Expression floor ({col} ≥ {threshold}): "
+          f"{len(df)}/{before} pairs retained")
+    return df
+
 
 def bh_fdr(pvals: np.ndarray) -> np.ndarray:
     n = len(pvals)
@@ -163,8 +186,9 @@ def run_sig_only(cell_line: str) -> None:
 
     sig      = pd.read_csv(sig_path)
     testable = sig[(sig["testable"] == True) & sig["delta_z"].notna()].copy()
+    testable = apply_expr_filter(testable, cell_line)
     if len(testable) == 0:
-        print(f"[skip] No testable pairs for {cell_line}.")
+        print(f"[skip] No testable pairs for {cell_line} after expression filter.")
         return
 
     pert_mean, gene_index, n_perts = load_h5ad(cell_line)
@@ -208,7 +232,8 @@ def run_all_pairs(cell_line: str) -> None:
 
     ranked = pd.read_csv(ranked_path)
     ranked = ranked.dropna(subset=["delta_z"]).copy()
-    print(f"\n[{cell_line}] {len(ranked):,} pairs to score")
+    ranked = apply_expr_filter(ranked, cell_line)
+    print(f"\n[{cell_line}] {len(ranked):,} pairs to score after expression filter")
 
     pert_mean, gene_index, n_perts = load_h5ad(cell_line)
     if pert_mean is None:
