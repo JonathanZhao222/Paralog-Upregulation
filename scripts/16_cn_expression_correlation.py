@@ -276,6 +276,42 @@ def main() -> None:
     plt.close()
     print(f"Saved → {out_fig}")
 
+    # ── Density plot: where do sig paralogs fall in the non-sig distribution? ─
+    fig_d, ax_d = plt.subplots(figsize=(9, 5))
+
+    ns_rna_clean  = ns_rna[np.isfinite(ns_rna)]
+    sig_rna_clean = sig_rna[np.isfinite(sig_rna)]
+
+    # Non-sig KDE
+    sns.kdeplot(ns_rna_clean, ax=ax_d, color=COLOUR_NS, fill=True,
+                alpha=0.3, linewidth=2, label=f"Non-significant paralogs (n={len(ns_rna_clean):,})")
+
+    # Sig paralogs as vertical lines with gene labels
+    sig_result = result[result["group"] == "significant"].dropna(subset=["rna_pearson_r"])
+    y_max = ax_d.get_ylim()[1] if ax_d.get_ylim()[1] > 0 else 1
+    ax_d.set_ylim(bottom=0)
+
+    for _, row in sig_result.iterrows():
+        ax_d.axvline(row["rna_pearson_r"], color=COLOUR_SIG, lw=1.2, alpha=0.7, zorder=3)
+
+    # Dummy handle for legend
+    from matplotlib.lines import Line2D
+    sig_handle = Line2D([0], [0], color=COLOUR_SIG, lw=1.5,
+                        label=f"Significant paralogs (n={len(sig_rna_clean)})")
+    ax_d.legend(handles=[ax_d.get_legend_handles_labels()[0][0], sig_handle],
+                fontsize=9, frameon=False)
+
+    ax_d.set_xlabel("Pearson r  (copy number vs RNA expression)", fontsize=11)
+    ax_d.set_ylabel("Density", fontsize=11)
+    ax_d.set_title("Distribution of CN–RNA coupling across paralog genes\n"
+                   "Significant paralogs marked individually", fontsize=11)
+    sns.despine(ax=ax_d)
+    plt.tight_layout()
+    out_d = fig_dir / "16_cn_rna_density.pdf"
+    fig_d.savefig(out_d, bbox_inches="tight")
+    plt.close()
+    print(f"Saved → {out_d}")
+
     # ── Raw CN vs expression scatter (sig genes highlighted) ─────────────────
     common_rna  = cn.index.intersection(rna.index)
     common_prot = cn.index.intersection(prot.index)
