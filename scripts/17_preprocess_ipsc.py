@@ -178,100 +178,121 @@ def lognorm_zscore(pb: np.ndarray) -> np.ndarray:
     return _zscore(pb_norm)
 
 
-# ── Cell-cycle regression path ────────────────────────────────────────────────
+# ── Cell-cycle regression path (chunked) ─────────────────────────────────────
 
-def lognorm_sparse(X_raw) -> sp.csr_matrix:
+def cell_cycle_corrected_pseudobulk_chunked(
+    raw,
+    labels: np.ndarray,
+    unique_perts: list,
+    gene_names: list[str],
+    chunk_size: int = 1000,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Sparse log1p(CPM) normalisation.  Zeros remain zero (log1p(0)=0), so
-    sparsity is fully preserved — avoids densifying the 2.66M × 37K matrix.
+    Memory-efficient chunked cell-cycle regression + pseudobulk.
+
+    Why chunked: the naive approach materialises a log-normalised copy of the
+    full matrix (2.66M × 37K ≈ 200-400 GB), causing OOM on the 512 GB node.
+    Here we process chunk_size genes at a time, log-normalising and computing
+    regression on only that slice before discarding it.  Peak extra memory per
+    chunk ≈ n_valid × chunk_size × 4 bytes ≈ 10 GB for chunk_size=1000.
+
+    Key identity (linearity of means) used for regression:
+        mean_p(X_corrected) = mean_p(X) − β_S·mean_p(S) − β_G2M·mean_p(G2M)
+
+    Returns (pb_corrected, s_scores, g2m_scores).
     """
-    if not sp.issparse(X_raw):
-        X_raw = sp.csr_matrix(X_raw)
-    X = X_raw.astype(np.float32).copy()
-    lib_sizes = np.asarray(X.sum(axis=1)).ravel().astype(np.float64)
+    import gc
+    n_cells, n_genes = raw.shape
+
+    # ── Per-cell CPM scale factors ─────────────────────────────────────────
+    if sp.issparse(raw):
+        lib_sizes = np.asarray(raw.sum(axis=1)).ravel()
+    else:
+        lib_sizes = raw.sum(axis=1)
+    lib_sizes = lib_sizes.astype(np.float64)
     lib_sizes[lib_sizes == 0] = 1.0
-    scale = (1e6 / lib_sizes).astype(np.float32)
-    X = X.multiply(scale[:, None]).tocsr()
-    X.data = np.log1p(X.data)
-    return X
+    scales = (1e6 / lib_sizes).astype(np.float32)          # n_cells
 
-
-def score_cell_cycle(X_lognorm: sp.csr_matrix,
-                     gene_names: list[str]) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Per-cell S_score and G2M_score as the mean log-normalised expression
-    of the Tirosh et al. 2015 S-phase and G2M-phase gene sets respectively.
-    Only genes detected in the data are used.
-    """
+    # ── Cell-cycle scoring (reads only ~100 gene columns) ─────────────────
     gene_idx = {g: i for i, g in enumerate(gene_names)}
     s_idx    = [gene_idx[g] for g in S_GENES   if g in gene_idx]
     g2m_idx  = [gene_idx[g] for g in G2M_GENES if g in gene_idx]
-    print(f"  Cell-cycle genes found: {len(s_idx)}/{len(S_GENES)} S-phase, "
+    print(f"  CC genes found: {len(s_idx)}/{len(S_GENES)} S-phase, "
           f"{len(g2m_idx)}/{len(G2M_GENES)} G2M-phase")
 
-    s_scores   = np.asarray(X_lognorm[:, s_idx].mean(axis=1)).ravel().astype(np.float32)
-    g2m_scores = np.asarray(X_lognorm[:, g2m_idx].mean(axis=1)).ravel().astype(np.float32)
-    return s_scores, g2m_scores
+    def _score_subset(idx):
+        sub = raw[:, idx]
+        if sp.issparse(sub):
+            sub = sub.toarray()
+        sub = np.log1p(sub.astype(np.float32) * scales[:, None])
+        return sub.mean(axis=1).astype(np.float32)
 
+    s_scores   = _score_subset(s_idx)
+    g2m_scores = _score_subset(g2m_idx)
+    print(f"  S_score:   mean={s_scores.mean():.4f}  std={s_scores.std():.4f}")
+    print(f"  G2M_score: mean={g2m_scores.mean():.4f}  std={g2m_scores.std():.4f}")
 
-def pseudobulk_mean_cc_corrected(
-    X_lognorm: sp.csr_matrix,
-    labels: np.ndarray,
-    unique_perts: list,
-    s_scores: np.ndarray,
-    g2m_scores: np.ndarray,
-) -> np.ndarray:
-    """
-    Pseudobulk mean of log-normalised expression with cell-cycle regression.
-
-    Key identity (linearity of means):
-        mean_p(X_corrected) = mean_p(X) − β_S · mean_p(S) − β_G2M · mean_p(G2M)
-
-    where β_S, β_G2M come from fitting X ~ 1 + S_score + G2M_score globally
-    across all cells.  This avoids materialising the full per-cell correction
-    matrix (would be ~394 GB for 2.66M × 37K).
-    """
+    # ── Perturbation index ─────────────────────────────────────────────────
     pert_to_idx = {p: i for i, p in enumerate(unique_perts)}
+    cell_idx    = np.array([pert_to_idx.get(l, -1) for l in labels])
+    valid       = cell_idx >= 0
+    cidx_v      = cell_idx[valid]
+    n_valid     = int(valid.sum())
     n_perts     = len(unique_perts)
-    n_genes     = X_lognorm.shape[1]
 
-    cell_idx = np.array([pert_to_idx.get(l, -1) for l in labels])
-    valid    = cell_idx >= 0
-    cidx_v   = cell_idx[valid]
-    n_valid  = int(valid.sum())
+    counts  = np.bincount(cidx_v, minlength=n_perts).astype(np.float64)
+    inv_cnt = np.where(counts > 0, 1.0 / counts, 0.0)
 
-    # ── Pseudobulk mean of log-normalised expression ──────────────────────
+    # ── Design matrix and per-perturbation CC means ────────────────────────
+    s_v   = s_scores[valid].astype(np.float64)
+    g2m_v = g2m_scores[valid].astype(np.float64)
+    Z       = np.column_stack([np.ones(n_valid), s_v, g2m_v])  # n_valid × 3
+    ZtZ_inv = np.linalg.inv(Z.T @ Z)                           # 3 × 3
+    pb_s    = np.bincount(cidx_v, weights=s_v,   minlength=n_perts) * inv_cnt
+    pb_g2m  = np.bincount(cidx_v, weights=g2m_v, minlength=n_perts) * inv_cnt
+
+    # ── Indicator matrix for pseudobulk sums ──────────────────────────────
     indicator = sp.csr_matrix(
         (np.ones(n_valid, dtype=np.float32), (cidx_v, np.arange(n_valid))),
         shape=(n_perts, n_valid),
     )
-    X_valid = X_lognorm[valid]
+    scales_v = scales[valid]
 
-    print(f"  Pseudobulk matrix multiply (lognorm) ...")
-    pb_sum    = (indicator @ X_valid).toarray().astype(np.float64)   # n_perts × n_genes
-    counts    = np.bincount(cidx_v, minlength=n_perts).astype(np.float64)
-    inv_cnt   = np.where(counts > 0, 1.0 / counts, 0.0)
-    pb_mean   = pb_sum * inv_cnt[:, None]                             # n_perts × n_genes
+    # ── Chunked gene processing ────────────────────────────────────────────
+    pb_corrected = np.zeros((n_perts, n_genes), dtype=np.float32)
+    n_chunks = (n_genes + chunk_size - 1) // chunk_size
+    print(f"  Chunked pseudobulk + regression: {n_chunks} chunks × {chunk_size} genes ...")
 
-    # ── Global regression coefficients ────────────────────────────────────
-    print("  Fitting global cell-cycle regression (3 × n_genes) ...")
-    s_v   = s_scores[valid].astype(np.float64)
-    g2m_v = g2m_scores[valid].astype(np.float64)
-    Z     = np.column_stack([np.ones(n_valid), s_v, g2m_v])          # n_valid × 3
+    for i in range(n_chunks):
+        start = i * chunk_size
+        end   = min(start + chunk_size, n_genes)
 
-    ZtZ_inv = np.linalg.inv(Z.T @ Z)                                 # 3 × 3
-    # sparse(n_genes × n_valid) @ dense(n_valid × 3) — scipy handles this efficiently
-    ZtX     = (X_valid.T @ Z).T                                       # 3 × n_genes
-    beta    = ZtZ_inv @ ZtX                                           # 3 × n_genes
+        # Extract valid rows for this gene chunk and log-normalise
+        sub = raw[valid, start:end]
+        if sp.issparse(sub):
+            sub = sub.toarray()
+        chunk = np.log1p(sub.astype(np.float32) * scales_v[:, None])  # n_valid × w
+        del sub
 
-    # ── Per-perturbation mean cell-cycle scores ────────────────────────────
-    pb_s   = np.bincount(cidx_v, weights=s_v,   minlength=n_perts) * inv_cnt
-    pb_g2m = np.bincount(cidx_v, weights=g2m_v, minlength=n_perts) * inv_cnt
+        # Pseudobulk mean  (n_perts × w)
+        pb_chunk = (indicator @ chunk) * inv_cnt[:, None]
 
-    # ── Apply correction (keeps mean expression, removes cell-cycle variance) ──
-    pb_corrected = pb_mean - pb_s[:, None] * beta[1] - pb_g2m[:, None] * beta[2]
+        # Regression coefficients for this chunk  (3 × w)
+        ZtX  = Z.T @ chunk.astype(np.float64)
+        beta = ZtZ_inv @ ZtX
 
-    return pb_corrected.astype(np.float32)
+        # Corrected pseudobulk
+        pb_corrected[:, start:end] = (
+            pb_chunk - pb_s[:, None] * beta[1] - pb_g2m[:, None] * beta[2]
+        ).astype(np.float32)
+
+        del chunk, pb_chunk, ZtX, beta
+        gc.collect()
+
+        if (i + 1) % 10 == 0 or i == n_chunks - 1:
+            print(f"    Chunk {i + 1}/{n_chunks}  ({end}/{n_genes} genes done)")
+
+    return pb_corrected, s_scores, g2m_scores
 
 
 # ── Shared z-score ────────────────────────────────────────────────────────────
@@ -352,21 +373,13 @@ def main() -> None:
         pb_z = lognorm_zscore(pb)
 
     elif args.regress_cell_cycle:
-        # ── Cell-cycle regression path ────────────────────────────────────
+        # ── Cell-cycle regression path (chunked) ──────────────────────────
         counts_df = pd.Series(pert_labels.values).value_counts()
         unique_perts = [p for p, n in counts_df.items() if n >= MIN_CELLS]
         print(f"  Perturbations with ≥{MIN_CELLS} cells: {len(unique_perts):,}")
 
-        print("  Sparse log1p(CPM) normalising single cells ...")
-        X_lognorm = lognorm_sparse(raw)
-
-        print("  Scoring cell cycle ...")
-        s_scores, g2m_scores = score_cell_cycle(X_lognorm, gene_names)
-        print(f"  S_score:   mean={s_scores.mean():.4f}, std={s_scores.std():.4f}")
-        print(f"  G2M_score: mean={g2m_scores.mean():.4f}, std={g2m_scores.std():.4f}")
-
-        pb = pseudobulk_mean_cc_corrected(
-            X_lognorm, pert_labels.values, unique_perts, s_scores, g2m_scores
+        pb, _, _ = cell_cycle_corrected_pseudobulk_chunked(
+            raw, pert_labels.values, unique_perts, gene_names
         )
 
         print("  Z-scoring across perturbations ...")
