@@ -338,7 +338,7 @@ def run(cell_line: str, min_expr: float | None = None,
 def main() -> None:
     # Kept in sync with CELL_LINE_FILES in 02_compute_delta_z.py
     available = ["K562", "K562_essential", "rpe1", "HCT116", "HEK293T", "melanoma",
-                 "cd4t_rest", "cd4t_stim8hr", "cd4t_stim48hr", "neuron", "iPSC"]
+                 "cd4t_rest", "cd4t_stim8hr", "cd4t_stim48hr", "neuron", "iPSC", "iPSC_cc"]
 
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group(required=True)

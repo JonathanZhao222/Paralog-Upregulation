@@ -71,7 +71,8 @@ GENES_8P = [
 # ── Style ─────────────────────────────────────────────────────────────────────
 sns.set_theme(style="ticks", font_scale=1.0)
 plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42})
-COLOUR_AVAIL   = "#d62728"
+COLOUR_DOTS    = "#1f77b4"   # blue scatter dots + regression line
+COLOUR_STATS   = "#d62728"   # red stats annotation
 COLOUR_SUMMARY = "#1f77b4"
 
 
@@ -158,20 +159,53 @@ def compute_signatures(
 
     df = pd.DataFrame(sigs, index=gene_names)
     df.index.name = "gene"
+    dups = df.index.duplicated(keep="first").sum()
+    if dups:
+        df = df[~df.index.duplicated(keep="first")]
     return df
 
 
 # ── Correlation with RNA-seq ──────────────────────────────────────────────────
 
 def load_rnaseq(path: Path) -> pd.Series:
-    """Load bulk RNA-seq logFC file. Expects gene_name and logFC columns."""
+    """
+    Load bulk RNA-seq logFC file.
+    Accepts several common column-name conventions:
+      gene_name / logFC        (script default)
+      Expressed_Gene_Symbol / lfc   (Feng et al. Cell Genomics 2026)
+      gene / log2FoldChange    (DESeq2 default)
+    """
     df = pd.read_csv(path)
-    if "gene_name" not in df.columns or "logFC" not in df.columns:
+
+    # Detect gene column
+    gene_col = None
+    for c in ["gene_name", "Expressed_Gene_Symbol", "gene_symbol", "gene", "Gene"]:
+        if c in df.columns:
+            gene_col = c
+            break
+
+    # Detect logFC column
+    lfc_col = None
+    for c in ["logFC", "lfc", "log2FoldChange", "LFC", "log2FC"]:
+        if c in df.columns:
+            lfc_col = c
+            break
+
+    if gene_col is None or lfc_col is None:
         raise ValueError(
-            f"RNA-seq file must have 'gene_name' and 'logFC' columns. "
-            f"Found: {list(df.columns)}"
+            f"Cannot find gene or logFC columns in RNA-seq file.\n"
+            f"Found columns: {list(df.columns)}\n"
+            f"Expected a gene column (e.g. gene_name, Expressed_Gene_Symbol) "
+            f"and a logFC column (e.g. logFC, lfc, log2FoldChange)."
         )
-    return df.set_index("gene_name")["logFC"]
+
+    print(f"  Using columns: gene='{gene_col}', logFC='{lfc_col}'")
+    s = df.set_index(gene_col)[lfc_col]
+    dups = s.index.duplicated(keep="first").sum()
+    if dups:
+        print(f"  Dropping {dups} duplicate gene symbols (keeping first occurrence)")
+        s = s[~s.index.duplicated(keep="first")]
+    return s
 
 
 def scatter_one(
@@ -179,10 +213,11 @@ def scatter_one(
     sig: pd.Series,
     rna_lfc: pd.Series,
     ax: plt.Axes,
-) -> float | None:
+) -> tuple[float, int] | None:
     """
-    Scatter plot of RNA-seq logFC (x) vs perturbation Δz (y) for one 8p KD gene.
-    Returns Pearson r, or None if <20 common genes.
+    Scatter plot of RNA-seq logFC (x) vs perturbation lfc (y) for one 8p KD gene.
+    Matches the original figure style: blue dots, blue regression line, red stats top-left.
+    Returns (Pearson r, n_genes), or None if <20 common genes.
     """
     common = sig.index.intersection(rna_lfc.index)
     if len(common) < 20:
@@ -197,47 +232,60 @@ def scatter_one(
 
     r, p = pearsonr(x, y)
 
-    ax.scatter(x, y, s=3, alpha=0.3, color="#aec7e8", linewidths=0, rasterized=True)
+    ax.scatter(x, y, s=2, alpha=0.25, color=COLOUR_DOTS, linewidths=0, rasterized=True)
     m, b = np.polyfit(x, y, 1)
     xline = np.array([x.min(), x.max()])
-    ax.plot(xline, m * xline + b, color=COLOUR_AVAIL, linewidth=1.5)
+    ax.plot(xline, m * xline + b, color=COLOUR_DOTS, linewidth=1.5)
 
     ax.set_title(gene, fontsize=10, fontweight="bold")
-    ax.set_xlabel("logFC  (8p RNA-seq)", fontsize=8)
-    ax.set_ylabel("perturb Δz", fontsize=8)
+    ax.set_xlabel("logFC", fontsize=8)
+    ax.set_ylabel("perturb_lfc", fontsize=8)
 
-    p_str = f"{p:.2e}" if p >= 1e-300 else "< 1e-300"
+    p_str = f"{p:.3e}"
     ax.text(0.05, 0.95,
             f"r = {r:.3f}\np = {p_str}\nn = {len(x):,}",
             transform=ax.transAxes, fontsize=7,
-            va="top", color=COLOUR_AVAIL)
+            va="top", color=COLOUR_STATS)
     sns.despine(ax=ax)
-    return r
+    return r, len(x)
 
 
 def plot_scatter_grid(sigs: pd.DataFrame, rna_lfc: pd.Series,
-                      figures_dir: Path) -> dict[str, float]:
-    """One scatter per available gene on a grid. Returns {gene: r}."""
+                      figures_dir: Path, n_rna_total: int) -> dict[str, float]:
+    """One scatter per available gene on a 4-column grid. Returns {gene: r}."""
     genes = list(sigs.columns)
     ncols = min(4, len(genes))
     nrows = (len(genes) + ncols - 1) // ncols
     fig, axes = plt.subplots(nrows, ncols,
-                             figsize=(ncols * 4, nrows * 3.5))
+                             figsize=(ncols * 3.5, nrows * 3.2))
     axes = np.array(axes).ravel()
 
     r_values = {}
+    n_common = None
     for i, gene in enumerate(genes):
-        r = scatter_one(gene, sigs[gene], rna_lfc, axes[i])
-        if r is not None:
+        result = scatter_one(gene, sigs[gene], rna_lfc, axes[i])
+        if result is not None:
+            r, n = result
             r_values[gene] = r
+            n_common = n
 
     for j in range(len(genes), len(axes)):
         axes[j].set_visible(False)
 
     fig.suptitle(
-        "8p deletion gene KD signatures vs 8p RNA-seq logFC (iPSC Perturb-seq)",
-        fontsize=11, y=1.01,
+        f"RNA-seq correlation of {len(genes)} deleted-region genes "
+        "available as Perturb-seq targets",
+        fontsize=11, fontweight="bold", y=1.01,
     )
+
+    if n_common is not None:
+        fig.text(
+            0.5, -0.02,
+            f"Out of {n_rna_total:,} genes detected in 8p RNA-seq, "
+            f"{n_common:,} expressed genes also detected in Perturb-seq",
+            ha="center", fontsize=8, style="italic",
+        )
+
     plt.tight_layout()
     out = figures_dir / "01_8p_kd_vs_rnaseq_scatter.pdf"
     fig.savefig(out, bbox_inches="tight")
@@ -250,7 +298,7 @@ def plot_summary_bar(r_values: dict[str, float], figures_dir: Path) -> None:
     """Bar chart of Pearson r for each available 8p gene."""
     genes  = list(r_values.keys())
     rs     = [r_values[g] for g in genes]
-    colours = [COLOUR_AVAIL if r >= 0 else COLOUR_SUMMARY for r in rs]
+    colours = [COLOUR_DOTS if r >= 0 else COLOUR_STATS for r in rs]
 
     order = np.argsort(rs)[::-1]
     genes_s = [genes[i] for i in order]
@@ -341,9 +389,10 @@ def main() -> None:
 
     print(f"\nLoading RNA-seq logFC from {args.rna_seq} ...")
     rna_lfc = load_rnaseq(args.rna_seq)
-    print(f"  {len(rna_lfc):,} genes with logFC values")
+    n_rna_total = len(rna_lfc)
+    print(f"  {n_rna_total:,} genes with logFC values")
 
-    r_values = plot_scatter_grid(sigs, rna_lfc, figures_dir)
+    r_values = plot_scatter_grid(sigs, rna_lfc, figures_dir, n_rna_total)
 
     if r_values:
         r_df = pd.DataFrame(
