@@ -12,6 +12,8 @@ Two modes:
 
 Gene sets queried: KEGG_2021_Human, GO_Biological_Process_2023, Reactome_2022
 
+
+
 Outputs (saved to results/gsea/ or results/gsea_top/)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   upregulated_paralogs.txt      — gene list submitted
