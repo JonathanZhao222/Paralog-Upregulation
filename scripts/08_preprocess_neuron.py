@@ -10,7 +10,7 @@ Source
   PerturBase data index: CRISPRi
   Paper: "Genome-wide CRISPRi/a screens in human neurons link lysosomal
           failure to ferroptosis" (Tian et al. 2021, Nature Neuroscience)
-  185 perturbations, 32 300 cells, 33 538 genes
+  185 perturbations, 32,300 cells, 33,538 genes
   Download: python scripts/00_download_data.py --neuron
 
 Format of raw input (data/raw/neuron_raw.h5ad)
