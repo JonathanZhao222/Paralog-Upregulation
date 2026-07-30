@@ -1,5 +1,6 @@
 """
 01_explore_dataset.py
+
 ---------------------
 Loads the downloaded AnnData and reports:
   - Shape, obs columns, obs index, var index
