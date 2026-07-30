@@ -2,7 +2,7 @@
 06_preprocess_gse291147.py
 --------------------------
 Converts GSE291147 (CRISPRi Perturb-seq in melanoma cells, Nature 2026) raw
-count data into a pseudobulk z-normalised h5ad compatible with
+count data into a pseudobulk z-normalised h5ad file compatible with
 02_compute_delta_z.py.
 
 Dataset overview
