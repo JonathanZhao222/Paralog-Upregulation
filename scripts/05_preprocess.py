@@ -6,9 +6,9 @@ files compatible with 02_compute_delta_z.py.
 
 Handles two input types:
   1. Replogle raw pseudobulk  (K562_essential_raw_bulk_01.h5ad)
-     — already pseudobulk, just needs log1p(CPM) + z-score
+     - already pseudobulk, just needs log1p(CPM) + z-score
   2. X-Atlas single-cell h5ad (HCT116, HEK293T)
-     — aggregate cells per perturbation → pseudobulk → log1p(CPM) + z-score
+     - aggregate cells per perturbation -> pseudobulk -> log1p(CPM) + z-score
 
 Pipeline
 ~~~~~~~~
