@@ -1,7 +1,7 @@
 """
 04_cross_cell_line.py
 ---------------------
-Compares Δz results across cell lines for significant paralog pairs.
+Compares delta-z results across cell lines for significant paralog pairs.
 
 Requires results/{cell_line}/sig_results.csv to exist for each cell line.
 Run 02_compute_delta_z.py --all first.

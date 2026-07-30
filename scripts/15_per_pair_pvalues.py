@@ -64,6 +64,7 @@ DEFAULT_EXPR_FLOOR = {
 }
 
 
+
 def apply_expr_filter(df: pd.DataFrame, cell_line: str) -> pd.DataFrame:
     col = "paralog_ccle_log2tpm" if "paralog_ccle_log2tpm" in df.columns \
           else "paralog_ctrl_mean_z" if "paralog_ctrl_mean_z" in df.columns \
@@ -81,6 +82,7 @@ def apply_expr_filter(df: pd.DataFrame, cell_line: str) -> pd.DataFrame:
 
 
 def bh_fdr(pvals: np.ndarray) -> np.ndarray:
+    # Benjamini-Hochberg correction
     n = len(pvals)
     order = np.argsort(pvals)
     ranks = np.empty(n, dtype=int)

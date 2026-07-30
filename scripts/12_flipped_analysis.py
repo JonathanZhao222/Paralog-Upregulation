@@ -1,8 +1,8 @@
 """
 12_flipped_analysis.py
 ----------------------
-Scatter plot of Δz (dep_gene KD → paralog expression) vs Δz_flipped
-(paralog KD → dep_gene expression) for significant pairs.
+Scatter plot of delta-z (dep_gene KD -> paralog expression) vs delta-z_flipped
+(paralog KD -> dep_gene expression) for significant pairs.
 
 Points in the upper-right quadrant show reciprocal upregulation — knocking
 down either gene causes the other to go up, suggesting bidirectional

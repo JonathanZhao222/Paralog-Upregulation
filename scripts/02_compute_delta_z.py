@@ -47,6 +47,7 @@ from tqdm import tqdm
 CTRL_LABEL = "non-targeting"
 
 ROOT      = Path(__file__).resolve().parent.parent
+
 DATA_DIR  = ROOT / "data" / "raw"
 SIG_XL    = DATA_DIR / "sig_37_paralog.xlsx"
 NONSIG_XL = DATA_DIR / "non_sig_paralog.xlsx"
@@ -140,6 +141,7 @@ def delta_z(
     paralog_gene: str,
     ctrl_vec: np.ndarray,
 ) -> float | None:
+    # Returns None when gene is not in library or not measurable
     if kd_gene not in pert_mean:
         return None
     if paralog_gene not in gene_index:

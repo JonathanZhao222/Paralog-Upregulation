@@ -3,7 +3,7 @@
 --------------------------------
 For every gene that appears in paralog pairs (sig or non-sig), computes
 the Pearson correlation between:
-  1. Gene copy number vs RNA expression  (CCLE, ~980 cell lines)
+  1. Gene copy number vs RNA expression   (CCLE, ~980 cell lines)
   2. Gene copy number vs protein abundance (ProCan, ~947 cell lines)
 
 across CCLE cell lines.  Then compares the correlation distributions for:

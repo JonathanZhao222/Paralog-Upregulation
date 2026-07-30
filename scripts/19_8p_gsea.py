@@ -40,9 +40,11 @@ DEFAULT_GENE_SETS = [
     "GO_Biological_Process_2023",
 ]
 
+
+
 FDR_THRESHOLD  = 0.25   # GSEA standard threshold
-MIN_SIZE       = 15
-MAX_SIZE       = 500
+MIN_SIZE       = 15     # minimum gene set size
+MAX_SIZE       = 500    # maximum gene set size
 PERMUTATIONS   = 1000
 
 
@@ -51,6 +53,7 @@ def run_gsea_for_gene(gene: str, ranked: pd.Series,
     """Run preranked GSEA for one KD gene. Returns combined results DataFrame."""
     ranked = ranked.dropna().sort_values(ascending=False)
     ranked = ranked[~ranked.index.duplicated(keep="first")]
+    # gseapy requires unique gene names
 
     all_results = []
     for gs in gene_sets:

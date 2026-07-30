@@ -1,7 +1,7 @@
 """
 10_rank_all_pairs.py
 --------------------
-Ranks ALL paralog pairs (significant + non-significant) by Δz for a given
+Ranks ALL paralog pairs (significant + non-significant) by delta-z for a given
 cell line and shows where the 37 aneuploidy vulnerability pairs fall in
 that ranking.
 

@@ -56,6 +56,7 @@ DEFAULT_INPUT = DATA_DIR / "iPSC_KOLF2_pseudobulk_normalized.h5ad"
 CTRL_LABEL    = "non-targeting"
 
 # ── 8p deletion gene list ─────────────────────────────────────────────────────
+# 8p chromosome deleted region genes
 GENES_8P = [
     "DLGAP2",
     "TDRP",
@@ -72,8 +73,8 @@ GENES_8P = [
 sns.set_theme(style="ticks", font_scale=1.0)
 plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42})
 COLOUR_DOTS    = "#1f77b4"   # blue scatter dots + regression line
-COLOUR_STATS   = "#d62728"   # red stats annotation
-COLOUR_SUMMARY = "#1f77b4"
+COLOUR_STATS   = "#d62728"   # red stats annotation text
+COLOUR_SUMMARY = "#1f77b4"   # blue summary bar
 
 
 # ── Load ──────────────────────────────────────────────────────────────────────
@@ -115,6 +116,7 @@ def load_ipsc(path: Path):
 # ── Availability ──────────────────────────────────────────────────────────────
 
 def check_availability(genes_8p: list[str], pert_labels: list[str]) -> pd.DataFrame:
+    # Returns availability table: gene -> in_iPSC_library boolean
     """Report which 8p genes have a CRISPRi knockdown in the iPSC library."""
     pert_set = set(pert_labels)
     rows = []
