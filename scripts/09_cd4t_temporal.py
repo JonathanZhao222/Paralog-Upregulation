@@ -12,6 +12,7 @@ Output: figures/cd4t_temporal/01_temporal_dynamics.pdf
 
 Usage:
     python scripts/09_cd4t_temporal.py
+
 """
 
 import numpy as np
