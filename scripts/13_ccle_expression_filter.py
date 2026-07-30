@@ -16,8 +16,8 @@ CCLE source
 
 Cell line mapping
 ~~~~~~~~~~~~~~~~~
-  K562       → ACH-000551   (chronic myelogenous leukemia)
-  rpe1       → ACH-000634   (hTERT RPE-1, retinal pigment epithelial)
+  K562  → ACH-000551  (chronic myelogenous leukemia)
+  rpe1  → ACH-000634  (hTERT RPE-1, retinal pigment epithelial)
   K562_essential uses the same K562 expression profile.
   CD4T / neuron / melanoma are not in CCLE (primary or iPSC-derived).
 
