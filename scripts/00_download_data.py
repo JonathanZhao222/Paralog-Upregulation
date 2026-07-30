@@ -1,7 +1,7 @@
 """
 00_download_data.py
 -------------------
-Downloads Perturb-seq normalized pseudobulk datasets.
+Downloads Perturb-seq normalised pseudobulk datasets.
 
 Sources
 ~~~~~~~
