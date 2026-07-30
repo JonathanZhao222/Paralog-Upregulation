@@ -9,7 +9,7 @@ per-condition pseudobulk z-normalised h5ad files compatible with
 Dataset overview
 ~~~~~~~~~~~~~~~~
   ~10,000 genes knocked down by CRISPRi in primary human CD4+ T cells
-  from 4 donors under 3 stimulation conditions. 22 million cells total.
+  from 4 donors under 3 stimulation conditions. ~22 million cells total.
   Source: s3://genome-scale-tcell-perturb-seq/marson2025_data/
 
   File used (data/raw/):
