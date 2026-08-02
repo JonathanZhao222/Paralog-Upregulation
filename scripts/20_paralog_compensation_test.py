@@ -398,10 +398,17 @@ def main() -> None:
                         help="Also run Analysis A (GSEA per KD gene, slower)")
     parser.add_argument("--min-pct-id", type=float, default=0.0,
                         help="Minimum paralog percent identity to include (default 0 = all)")
+    parser.add_argument("--data-dir", type=Path, default=None,
+                        help="Override path to directory containing h5ad files")
     args = parser.parse_args()
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
+    global DATA_DIR
+    if args.data_dir is not None:
+        DATA_DIR = args.data_dir
+        print(f"Using data dir: {DATA_DIR}")
 
     # Step 1: Paralog table
     cache = RESULTS_DIR / "paralog_table.csv"
