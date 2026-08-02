@@ -66,7 +66,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.stats import mannwhitneyu, norm
+from scipy.stats import mannwhitneyu, ttest_1samp
 from tqdm import tqdm
 
 ROOT        = Path(__file__).resolve().parent.parent
@@ -318,7 +318,6 @@ def plot_ranksum(ranksum_df: pd.DataFrame, cell_line: str,
     ax.axvline(rbc.mean(), color="#d62728", linewidth=1.5, linestyle="-",
                label=f"mean = {rbc.mean():.4f}")
     # One-sample t-test against 0
-    from scipy.stats import ttest_1samp
     t, p = ttest_1samp(rbc.dropna(), 0)
     ax.set_title(f"Rank-biserial correlation\n(paralogs vs non-paralogs)\np={p:.2e}",
                  fontsize=9)
@@ -370,7 +369,6 @@ def plot_gsea(gsea_df: pd.DataFrame, cell_line: str, figures_dir: Path) -> None:
     ax.axvline(0, color="grey", linewidth=1, linestyle="--")
     ax.axvline(nes.mean(), color="#d62728", linewidth=1.5,
                label=f"mean NES = {nes.mean():.3f}")
-    from scipy.stats import ttest_1samp
     _, p = ttest_1samp(nes.dropna(), 0)
     ax.set_title(
         f"GSEA NES distribution — {cell_line}\n"
@@ -439,7 +437,10 @@ def main() -> None:
     print(f"  Saved → {ranksum_path}")
 
     rbc = ranksum_df["rank_biserial_r"].dropna()
-    from scipy.stats import ttest_1samp
+    if rbc.empty:
+        print("  WARNING: no KD genes had paralogs in the transcriptome — "
+              "check that paralog gene names match h5ad var['gene_name'].")
+        return
     t_stat, p_val = ttest_1samp(rbc, 0)
     print(f"\n  === Analysis B summary [{args.cell_line}] ===")
     print(f"  KD genes tested:        {len(ranksum_df):,}")
@@ -459,12 +460,15 @@ def main() -> None:
             gsea_df.to_csv(gsea_path, index=False)
             print(f"  Saved → {gsea_path}")
             nes = gsea_df["nes"].dropna()
-            t2, p2 = ttest_1samp(nes, 0)
-            print(f"\n  === Analysis A summary [{args.cell_line}] ===")
-            print(f"  KD genes tested:  {len(gsea_df):,}")
-            print(f"  Mean NES:         {nes.mean():.4f}")
-            print(f"  t-test vs 0:      t={t2:.3f}, p={p2:.3e}")
-            plot_gsea(gsea_df, args.cell_line, FIGURES_DIR)
+            if nes.empty:
+                print("  WARNING: all GSEA NES values are NaN.")
+            else:
+                t2, p2 = ttest_1samp(nes, 0)
+                print(f"\n  === Analysis A summary [{args.cell_line}] ===")
+                print(f"  KD genes tested:  {len(gsea_df):,}")
+                print(f"  Mean NES:         {nes.mean():.4f}")
+                print(f"  t-test vs 0:      t={t2:.3f}, p={p2:.3e}")
+                plot_gsea(gsea_df, args.cell_line, FIGURES_DIR)
 
     print("\nDone.")
 
