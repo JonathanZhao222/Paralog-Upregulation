@@ -474,7 +474,13 @@ def fetch_essential_genes(cache_path: Path) -> set[str]:
     print("  Downloading Hart et al. CEGv2 essential gene list ...")
     r = requests.get(ESSENTIAL_GENES_URL, timeout=60)
     r.raise_for_status()
-    genes = set(line.strip() for line in r.text.splitlines() if line.strip())
+    genes = set()
+    for line in r.text.splitlines():
+        if not line.strip():
+            continue
+        gene = line.strip().split("\t")[0].strip()
+        if gene:
+            genes.add(gene)
     pd.Series(sorted(genes)).to_csv(cache_path, index=False, header=False)
     print(f"  {len(genes):,} core essential genes downloaded → {cache_path}")
     return genes
