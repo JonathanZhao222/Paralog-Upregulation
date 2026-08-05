@@ -620,6 +620,10 @@ def main() -> None:
                         help="Gene set libraries for consensus GSEA")
     parser.add_argument("--consensus-permutations", type=int, default=1000,
                         help="Permutations for consensus GSEA (default 1000)")
+    parser.add_argument("--exclude-prefix", nargs="+", default=[],
+                        metavar="PREFIX",
+                        help="Exclude KD genes whose names start with these prefixes "
+                             "(e.g. --exclude-prefix ZNF ZFP to remove zinc finger genes)")
     parser.add_argument("--min-pct-id", type=float, default=0.0,
                         help="Minimum paralog percent identity to include (default 0 = all)")
     parser.add_argument("--data-dir", type=Path, default=None,
@@ -655,6 +659,13 @@ def main() -> None:
     dz_df, _ = load_delta_z(args.cell_line)
     print(f"  Δz matrix loaded in {time.time()-t0:.1f}s  "
           f"shape: {dz_df.shape[0]:,} × {dz_df.shape[1]:,}")
+
+    if args.exclude_prefix:
+        prefixes = tuple(args.exclude_prefix)
+        before = len(dz_df)
+        dz_df = dz_df[~dz_df.index.str.startswith(prefixes)]
+        print(f"  Excluded KD genes with prefix(es) {list(args.exclude_prefix)}: "
+              f"{before - len(dz_df):,} removed, {len(dz_df):,} remaining")
 
     # Step 3: Analysis B
     ranksum_df = run_ranksum(dz_df, paralog_lookup)
