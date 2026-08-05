@@ -66,7 +66,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.stats import mannwhitneyu, ttest_1samp
+from scipy.stats import mannwhitneyu, ttest_1samp, fisher_exact
 from tqdm import tqdm
 
 ROOT        = Path(__file__).resolve().parent.parent
@@ -247,6 +247,63 @@ def run_ranksum(dz_df: pd.DataFrame, paralog_lookup: dict[str, set]) -> pd.DataF
     return df
 
 
+# ── Step 3b: Analysis C — upregulated-gene enrichment ─────────────────────────
+
+def run_upregulated_enrichment(dz_df: pd.DataFrame,
+                                paralog_lookup: dict[str, set]) -> pd.DataFrame:
+    """
+    For each KD gene, test whether its paralogs are enriched among the upregulated
+    genes (Δz > 0) using a Fisher's exact test (one-tailed, 'greater').
+    2×2 table: (paralog / non-paralog) × (Δz > 0 / Δz ≤ 0).
+    """
+    gene_set = set(dz_df.columns)
+    results  = []
+
+    kd_genes = list(dz_df.index)
+    print(f"\nAnalysis C: upregulated-gene enrichment for {len(kd_genes):,} KD genes ...")
+
+    for kd in tqdm(kd_genes, desc="up-enrichment"):
+        paralogs = paralog_lookup.get(kd, set()) & gene_set
+        if len(paralogs) < MIN_PARALOGS_RANKSUM:
+            continue
+
+        row = dz_df.loc[kd].dropna()
+
+        para_vals  = row[list(paralogs & set(row.index))].values.astype(float)
+        para_vals  = para_vals[np.isfinite(para_vals)]
+        if len(para_vals) == 0:
+            continue
+
+        other_vals = row[~row.index.isin(paralogs)].values.astype(float)
+        other_vals = other_vals[np.isfinite(other_vals)]
+        if len(other_vals) == 0:
+            continue
+
+        n_para      = len(para_vals)
+        n_para_up   = int((para_vals > 0).sum())
+        n_other     = len(other_vals)
+        n_other_up  = int((other_vals > 0).sum())
+
+        table = [[n_para_up,  n_para  - n_para_up],
+                 [n_other_up, n_other - n_other_up]]
+        odds_ratio, pval = fisher_exact(table, alternative="greater")
+
+        results.append({
+            "kd_gene":       kd,
+            "n_paralogs":    n_para,
+            "n_para_up":     n_para_up,
+            "frac_para_up":  n_para_up  / n_para,
+            "frac_other_up": n_other_up / n_other,
+            "delta_frac":    n_para_up  / n_para - n_other_up / n_other,
+            "odds_ratio":    odds_ratio,
+            "fisher_pval":   pval,
+        })
+
+    df = pd.DataFrame(results)
+    print(f"  {len(df):,} KD genes tested")
+    return df
+
+
 # ── Step 4: Analysis A — GSEA per KD gene ─────────────────────────────────────
 
 def run_gsea_analysis(dz_df: pd.DataFrame,
@@ -360,6 +417,49 @@ def plot_ranksum(ranksum_df: pd.DataFrame, cell_line: str,
     print(f"Saved {out}")
 
 
+def plot_upregulated_enrichment(up_df: pd.DataFrame, cell_line: str,
+                                figures_dir: Path) -> None:
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    # Panel 1: distribution of delta fraction
+    ax = axes[0]
+    delta = up_df["delta_frac"].dropna()
+    ax.hist(delta, bins=60, color="#9467bd", alpha=0.7, edgecolor="none")
+    ax.axvline(0, color="grey", linewidth=1, linestyle="--")
+    ax.axvline(delta.mean(), color="#d62728", linewidth=1.5,
+               label=f"mean = {delta.mean():.4f}")
+    t, p = ttest_1samp(delta, 0)
+    ax.set_title(f"Fraction paralogs up − fraction others up\np={p:.2e}", fontsize=9)
+    ax.set_xlabel("Delta fraction upregulated (Dz > 0)", fontsize=8)
+    ax.set_ylabel("Number of KD genes", fontsize=8)
+    ax.legend(fontsize=7)
+    sns.despine(ax=ax)
+
+    # Panel 2: mean bar comparison
+    ax = axes[1]
+    means = [up_df["frac_para_up"].mean(), up_df["frac_other_up"].mean()]
+    sems  = [up_df["frac_para_up"].sem(),  up_df["frac_other_up"].sem()]
+    ax.bar(["Paralogs", "Non-paralogs"], means, yerr=sems,
+           color=["#9467bd", "#aec7e8"], edgecolor="black", linewidth=0.6,
+           capsize=4, width=0.5)
+    ax.set_ylabel("Mean fraction with Dz > 0", fontsize=8)
+    ax.set_title(f"Fraction upregulated: paralogs vs non-paralogs\n{cell_line}",
+                 fontsize=9)
+    ax.set_ylim(0, max(means) * 1.3)
+    sns.despine(ax=ax)
+
+    fig.suptitle(
+        f"Paralog enrichment among upregulated genes — {cell_line}\n"
+        f"n = {len(delta):,} KD genes",
+        fontsize=10, fontweight="bold"
+    )
+    plt.tight_layout()
+    out = figures_dir / "20_upregulated_enrichment.pdf"
+    fig.savefig(out, bbox_inches="tight", dpi=150)
+    plt.close()
+    print(f"Saved {out}")
+
+
 def plot_gsea(gsea_df: pd.DataFrame, cell_line: str, figures_dir: Path) -> None:
     if gsea_df.empty:
         return
@@ -451,6 +551,23 @@ def main() -> None:
     print(f"  Fraction r > 0:         {frac_pos:.3f}")
 
     plot_ranksum(ranksum_df, args.cell_line, FIGURES_DIR)
+
+    # Step 3b: Analysis C — upregulated enrichment
+    up_df = run_upregulated_enrichment(dz_df, paralog_lookup)
+    up_path = RESULTS_DIR / f"upregulated_enrichment_{args.cell_line}.csv"
+    up_df.to_csv(up_path, index=False)
+    print(f"  Saved -> {up_path}")
+
+    delta = up_df["delta_frac"].dropna()
+    if not delta.empty:
+        t3, p3 = ttest_1samp(delta, 0)
+        print(f"\n  === Analysis C summary [{args.cell_line}] ===")
+        print(f"  KD genes tested:           {len(up_df):,}")
+        print(f"  Mean frac paralogs up:     {up_df['frac_para_up'].mean():.4f}")
+        print(f"  Mean frac non-paralogs up: {up_df['frac_other_up'].mean():.4f}")
+        print(f"  Mean delta fraction:       {delta.mean():.5f}")
+        print(f"  t-test vs 0:               t={t3:.3f}, p={p3:.3e}")
+        plot_upregulated_enrichment(up_df, args.cell_line, FIGURES_DIR)
 
     # Step 4: Analysis A (optional)
     if args.gsea:
