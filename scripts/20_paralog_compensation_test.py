@@ -737,6 +737,10 @@ def main() -> None:
                         help="Gene set libraries for consensus GSEA")
     parser.add_argument("--consensus-permutations", type=int, default=1000,
                         help="Permutations for consensus GSEA (default 1000)")
+    parser.add_argument("--min-paralogs", type=int, default=None,
+                        help="Minimum number of paralogs a KD gene must have to be "
+                             "included in Analyses B and C (overrides MIN_PARALOGS_RANKSUM=1). "
+                             "Use >=3 to remove the single-paralog spike in Figure 2.")
     parser.add_argument("--exclude-prefix", nargs="+", default=[],
                         metavar="PREFIX",
                         help="Exclude KD genes whose names start with these prefixes "
@@ -750,7 +754,10 @@ def main() -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-    global DATA_DIR
+    global DATA_DIR, MIN_PARALOGS_RANKSUM
+    if args.min_paralogs is not None:
+        MIN_PARALOGS_RANKSUM = args.min_paralogs
+        print(f"  Minimum paralogs for Analyses B & C set to {MIN_PARALOGS_RANKSUM}")
     if args.data_dir is not None:
         DATA_DIR = args.data_dir
         print(f"Using data dir: {DATA_DIR}")
