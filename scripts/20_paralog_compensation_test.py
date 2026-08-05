@@ -460,6 +460,124 @@ def plot_upregulated_enrichment(up_df: pd.DataFrame, cell_line: str,
     print(f"Saved {out}")
 
 
+def run_consensus_gsea(dz_df: pd.DataFrame, gene_sets: list[str],
+                       results_dir: Path, cell_line: str,
+                       permutations: int = 1000) -> pd.DataFrame:
+    """
+    Compute mean Δz per gene across all KD experiments, then run preranked
+    GSEA against standard pathway databases. Identifies which biological
+    processes are consistently up/downregulated across all KD experiments.
+    """
+    try:
+        import gseapy as gp
+    except ImportError:
+        print("gseapy not installed — skipping consensus GSEA.")
+        return pd.DataFrame()
+
+    print("\nConsensus GSEA: computing mean Dz across all KD experiments ...")
+    consensus = dz_df.mean(axis=0).dropna()
+    consensus = consensus[~consensus.index.duplicated(keep="first")]
+    consensus = consensus.sort_values(ascending=False)
+    print(f"  {len(consensus):,} genes ranked")
+    print(f"  Top 5 upregulated: {list(consensus.head().index)}")
+    print(f"  Top 5 downregulated: {list(consensus.tail().index)}")
+
+    all_results = []
+    for gs in gene_sets:
+        print(f"  Running against {gs} ...")
+        try:
+            pre = gp.prerank(
+                rnk=consensus,
+                gene_sets=gs,
+                min_size=15,
+                max_size=500,
+                permutation_num=permutations,
+                outdir=None,
+                seed=42,
+                verbose=False,
+                threads=4,
+            )
+            res = pre.res2d.copy()
+            res.insert(0, "gene_set_library", gs)
+            all_results.append(res)
+            fdr_col = next((c for c in res.columns if "fdr" in c.lower()), None)
+            n_sig = (pd.to_numeric(res[fdr_col], errors="coerce") < 0.25).sum() \
+                    if fdr_col else "?"
+            print(f"    {len(res)} gene sets tested, {n_sig} with FDR < 0.25")
+        except Exception as e:
+            print(f"    [{gs}]: {e}")
+
+    if not all_results:
+        return pd.DataFrame()
+
+    combined = pd.concat(all_results, ignore_index=True)
+    out = results_dir / f"consensus_gsea_{cell_line}.csv"
+    combined.to_csv(out, index=False)
+    print(f"  Saved -> {out}")
+    return combined
+
+
+def plot_consensus_gsea(gsea_df: pd.DataFrame, cell_line: str,
+                        figures_dir: Path, top_n: int = 20) -> None:
+    if gsea_df.empty:
+        return
+
+    cols     = gsea_df.columns.tolist()
+    fdr_col  = next((c for c in cols if "fdr" in c.lower()), None)
+    nes_col  = next((c for c in cols if c.lower() == "nes"), None)
+    term_col = next((c for c in cols if c.lower() == "term"), None) \
+               or next((c for c in cols if c.lower() == "name"), None)
+
+    if not all([fdr_col, nes_col, term_col]):
+        print(f"  Cannot find required columns. Found: {cols}")
+        return
+
+    df = gsea_df.copy()
+    df["fdr"]  = pd.to_numeric(df[fdr_col],  errors="coerce")
+    df["nes"]  = pd.to_numeric(df[nes_col],  errors="coerce")
+    df["term"] = df[term_col]
+    df = df.dropna(subset=["nes", "fdr"])
+
+    libraries = df["gene_set_library"].unique()
+    n_libs    = len(libraries)
+    fig, axes = plt.subplots(1, n_libs,
+                              figsize=(9 * n_libs, max(6, top_n * 0.4 + 2)),
+                              squeeze=False)
+
+    for ax, lib in zip(axes[0], libraries):
+        sub = df[df["gene_set_library"] == lib].copy()
+        half = top_n // 2
+        pos  = sub[sub["nes"] > 0].nlargest(half,  "nes")
+        neg  = sub[sub["nes"] < 0].nsmallest(half, "nes")
+        plot_sub = pd.concat([neg, pos]).sort_values("nes").reset_index(drop=True)
+
+        for i, (_, row) in enumerate(plot_sub.iterrows()):
+            colour = "#d62728" if row["nes"] > 0 else "#1f77b4"
+            alpha  = 1.0 if row["fdr"] < 0.25 else 0.35
+            ax.barh(i, row["nes"], color=colour, alpha=alpha, edgecolor="none")
+
+        ax.set_yticks(range(len(plot_sub)))
+        ax.set_yticklabels([t[:65] for t in plot_sub["term"]], fontsize=7)
+        ax.axvline(0, color="black", linewidth=0.8)
+        ax.set_xlabel("NES", fontsize=9)
+        ax.set_title(
+            f"{lib}\ntop {half} up + {half} down  |  opaque = FDR < 0.25",
+            fontsize=8
+        )
+        sns.despine(ax=ax)
+
+    fig.suptitle(
+        f"Consensus pathway enrichment — {cell_line}\n"
+        f"Genes ranked by mean Dz across all KD experiments",
+        fontsize=11, fontweight="bold"
+    )
+    plt.tight_layout()
+    out = figures_dir / "20_consensus_gsea.pdf"
+    fig.savefig(out, bbox_inches="tight", dpi=150)
+    plt.close()
+    print(f"Saved {out}")
+
+
 def plot_gsea(gsea_df: pd.DataFrame, cell_line: str, figures_dir: Path) -> None:
     if gsea_df.empty:
         return
@@ -494,6 +612,14 @@ def main() -> None:
                         default="iPSC")
     parser.add_argument("--gsea", action="store_true",
                         help="Also run Analysis A (GSEA per KD gene, slower)")
+    parser.add_argument("--consensus-gsea", action="store_true",
+                        help="Run consensus GSEA: mean Dz across all KD experiments "
+                             "ranked against standard pathway databases")
+    parser.add_argument("--consensus-gene-sets", nargs="+",
+                        default=["MSigDB_Hallmark_2020", "GO_Biological_Process_2023"],
+                        help="Gene set libraries for consensus GSEA")
+    parser.add_argument("--consensus-permutations", type=int, default=1000,
+                        help="Permutations for consensus GSEA (default 1000)")
     parser.add_argument("--min-pct-id", type=float, default=0.0,
                         help="Minimum paralog percent identity to include (default 0 = all)")
     parser.add_argument("--data-dir", type=Path, default=None,
@@ -568,6 +694,14 @@ def main() -> None:
         print(f"  Mean delta fraction:       {delta.mean():.5f}")
         print(f"  t-test vs 0:               t={t3:.3f}, p={p3:.3e}")
         plot_upregulated_enrichment(up_df, args.cell_line, FIGURES_DIR)
+
+    # Step 3c: Consensus GSEA (optional)
+    if args.consensus_gsea:
+        cgdf = run_consensus_gsea(dz_df, args.consensus_gene_sets,
+                                  RESULTS_DIR, args.cell_line,
+                                  args.consensus_permutations)
+        if not cgdf.empty:
+            plot_consensus_gsea(cgdf, args.cell_line, FIGURES_DIR)
 
     # Step 4: Analysis A (optional)
     if args.gsea:
