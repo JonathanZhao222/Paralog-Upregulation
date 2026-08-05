@@ -460,6 +460,120 @@ def plot_upregulated_enrichment(up_df: pd.DataFrame, cell_line: str,
     print(f"Saved {out}")
 
 
+ESSENTIAL_GENES_URL = (
+    "https://raw.githubusercontent.com/hart-lab/bagel/master/CEGv2.txt"
+)
+
+
+def fetch_essential_genes(cache_path: Path) -> set[str]:
+    """Download Hart et al. CEGv2 core essential genes (cached)."""
+    if cache_path.exists():
+        genes = set(pd.read_csv(cache_path, header=None)[0].str.strip())
+        print(f"  Loaded {len(genes):,} essential genes from cache")
+        return genes
+    print("  Downloading Hart et al. CEGv2 essential gene list ...")
+    r = requests.get(ESSENTIAL_GENES_URL, timeout=60)
+    r.raise_for_status()
+    genes = set(line.strip() for line in r.text.splitlines() if line.strip())
+    pd.Series(sorted(genes)).to_csv(cache_path, index=False, header=False)
+    print(f"  {len(genes):,} core essential genes downloaded → {cache_path}")
+    return genes
+
+
+def run_essential_comparison(dz_df: pd.DataFrame,
+                             paralog_lookup: dict[str, set],
+                             essential_genes: set[str],
+                             figures_dir: Path,
+                             cell_line: str) -> None:
+    """
+    Compare essential vs non-essential genes on two axes:
+      1. Mean Δz across all KD experiments (are essential genes consistently up/down?)
+      2. Number of paralogs (are essential genes less likely to have paralogs?)
+    """
+    gene_set = set(dz_df.columns)
+
+    consensus = dz_df.mean(axis=0).dropna()
+    consensus = consensus[~consensus.index.duplicated(keep="first")]
+
+    records = []
+    for gene in consensus.index:
+        n_para = len(paralog_lookup.get(gene, set()) & gene_set)
+        records.append({
+            "gene":       gene,
+            "mean_dz":    consensus[gene],
+            "n_paralogs": n_para,
+            "essential":  gene in essential_genes,
+        })
+    df = pd.DataFrame(records)
+
+    n_ess    = df["essential"].sum()
+    n_noness = (~df["essential"]).sum()
+    print(f"\n  Essential gene comparison: {n_ess:,} essential, {n_noness:,} non-essential")
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+
+    labels   = ["Essential", "Non-essential"]
+    colours  = ["#d62728", "#1f77b4"]
+    groups   = [df[df["essential"]], df[~df["essential"]]]
+
+    # Panel 1: mean Δz
+    ax = axes[0]
+    data_dz = [g["mean_dz"].values for g in groups]
+    parts = ax.violinplot(data_dz, positions=[0, 1], showmedians=True,
+                          showextrema=False)
+    for i, (body, col) in enumerate(zip(parts["bodies"], colours)):
+        body.set_facecolor(col)
+        body.set_alpha(0.6)
+    parts["cmedians"].set_color("black")
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(labels, fontsize=9)
+    ax.axhline(0, color="grey", linewidth=0.8, linestyle="--")
+    ax.set_ylabel("Mean Dz across all KD experiments", fontsize=8)
+    ax.set_title("Are essential genes consistently up or down?", fontsize=9)
+    # t-test
+    from scipy.stats import ttest_ind
+    t, p = ttest_ind(data_dz[0], data_dz[1])
+    ax.text(0.5, 0.97, f"t-test p = {p:.2e}", transform=ax.transAxes,
+            ha="center", va="top", fontsize=8)
+    sns.despine(ax=ax)
+
+    # Panel 2: number of paralogs
+    ax = axes[1]
+    data_np = [g["n_paralogs"].values for g in groups]
+    parts2 = ax.violinplot(data_np, positions=[0, 1], showmedians=True,
+                           showextrema=False)
+    for body, col in zip(parts2["bodies"], colours):
+        body.set_facecolor(col)
+        body.set_alpha(0.6)
+    parts2["cmedians"].set_color("black")
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(labels, fontsize=9)
+    ax.set_ylabel("Number of Ensembl paralogs", fontsize=8)
+    ax.set_title("Do essential genes have fewer paralogs?", fontsize=9)
+    from scipy.stats import mannwhitneyu
+    _, p2 = mannwhitneyu(data_np[0], data_np[1], alternative="two-sided")
+    ax.text(0.5, 0.97, f"Mann-Whitney p = {p2:.2e}", transform=ax.transAxes,
+            ha="center", va="top", fontsize=8)
+    sns.despine(ax=ax)
+
+    # Medians in text
+    for i, (lbl, grp) in enumerate(zip(labels, groups)):
+        print(f"  {lbl}: median mean_dz = {grp['mean_dz'].median():.4f}, "
+              f"median n_paralogs = {grp['n_paralogs'].median():.1f}")
+
+    fig.suptitle(
+        f"Essential vs non-essential genes — {cell_line}\n"
+        f"n_essential={n_ess:,}  n_non-essential={n_noness:,}  "
+        f"(Hart et al. CEGv2)",
+        fontsize=10, fontweight="bold"
+    )
+    plt.tight_layout()
+    out = figures_dir / "20_essential_comparison.pdf"
+    fig.savefig(out, bbox_inches="tight", dpi=150)
+    plt.close()
+    print(f"  Saved {out}")
+
+
 def run_consensus_gsea(dz_df: pd.DataFrame, gene_sets: list[str],
                        results_dir: Path, cell_line: str,
                        permutations: int = 1000) -> pd.DataFrame:
@@ -612,6 +726,9 @@ def main() -> None:
                         default="iPSC")
     parser.add_argument("--gsea", action="store_true",
                         help="Also run Analysis A (GSEA per KD gene, slower)")
+    parser.add_argument("--essential-comparison", action="store_true",
+                        help="Plot mean Dz and paralog count for essential vs "
+                             "non-essential genes (Hart et al. CEGv2)")
     parser.add_argument("--consensus-gsea", action="store_true",
                         help="Run consensus GSEA: mean Dz across all KD experiments "
                              "ranked against standard pathway databases")
@@ -706,7 +823,14 @@ def main() -> None:
         print(f"  t-test vs 0:               t={t3:.3f}, p={p3:.3e}")
         plot_upregulated_enrichment(up_df, args.cell_line, FIGURES_DIR)
 
-    # Step 3c: Consensus GSEA (optional)
+    # Step 3c: Essential gene comparison (optional)
+    if args.essential_comparison:
+        ess_cache = RESULTS_DIR / "essential_genes_cegv2.csv"
+        essential_genes = fetch_essential_genes(ess_cache)
+        run_essential_comparison(dz_df, paralog_lookup, essential_genes,
+                                 FIGURES_DIR, args.cell_line)
+
+    # Step 3e: Consensus GSEA (optional)
     if args.consensus_gsea:
         cgdf = run_consensus_gsea(dz_df, args.consensus_gene_sets,
                                   RESULTS_DIR, args.cell_line,
