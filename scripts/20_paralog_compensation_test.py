@@ -136,11 +136,12 @@ def build_paralog_lookup(df: pd.DataFrame) -> dict[str, set]:
 
 # ── Step 2: Load h5ad and compute Δz ─────────────────────────────────────────
 
-def load_delta_z(cell_line: str) -> tuple[pd.DataFrame, list[str]]:
+def load_delta_z(cell_line: str) -> tuple[pd.DataFrame, list[str], np.ndarray]:
     """
     Returns:
       delta_z_df: DataFrame (n_perts × n_genes) of Δz values
       gene_names: list of gene names (columns)
+      ctrl_vec:   mean z-score per gene in non-targeting controls
     """
     h5ad_path = DATA_DIR / CELL_LINE_FILES[cell_line]
     if not h5ad_path.exists():
@@ -194,7 +195,7 @@ def load_delta_z(cell_line: str) -> tuple[pd.DataFrame, list[str]]:
     ).astype(np.float32)   # shape: (n_kd, n_genes)
 
     df = pd.DataFrame(dz_matrix, index=kd_genes, columns=gene_names)
-    return df, gene_names
+    return df, gene_names, ctrl_vec
 
 
 # ── Step 3: Analysis B — rank-sum meta-analysis ───────────────────────────────
@@ -743,6 +744,11 @@ def main() -> None:
                         help="Gene set libraries for consensus GSEA")
     parser.add_argument("--consensus-permutations", type=int, default=1000,
                         help="Permutations for consensus GSEA (default 1000)")
+    parser.add_argument("--expr-floor", type=float, default=None,
+                        metavar="Z",
+                        help="Exclude genes with control mean z-score below this "
+                             "threshold from the measured gene columns "
+                             "(e.g. --expr-floor -2.0 to match the main iPSC analysis)")
     parser.add_argument("--min-paralogs", type=int, default=None,
                         help="Minimum number of paralogs a KD gene must have to be "
                              "included in Analyses B and C (overrides MIN_PARALOGS_RANKSUM=1). "
@@ -786,9 +792,17 @@ def main() -> None:
 
     # Step 2: Load Δz
     t0 = time.time()
-    dz_df, _ = load_delta_z(args.cell_line)
+    dz_df, gene_names, ctrl_vec = load_delta_z(args.cell_line)
     print(f"  Δz matrix loaded in {time.time()-t0:.1f}s  "
           f"shape: {dz_df.shape[0]:,} × {dz_df.shape[1]:,}")
+
+    if args.expr_floor is not None:
+        ctrl_series = pd.Series(ctrl_vec, index=gene_names)
+        expressed   = ctrl_series[ctrl_series >= args.expr_floor].index
+        before      = dz_df.shape[1]
+        dz_df       = dz_df[[g for g in dz_df.columns if g in expressed]]
+        print(f"  Expression floor (ctrl z >= {args.expr_floor}): "
+              f"{dz_df.shape[1]:,}/{before:,} genes retained")
 
     if args.exclude_prefix:
         prefixes = tuple(args.exclude_prefix)
