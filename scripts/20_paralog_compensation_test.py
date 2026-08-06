@@ -364,40 +364,31 @@ def run_gsea_analysis(dz_df: pd.DataFrame,
 
 # ── Step 5: Figures ───────────────────────────────────────────────────────────
 
-def plot_ranksum(ranksum_df: pd.DataFrame, cell_line: str,
-                 figures_dir: Path) -> None:
-    fig, axes = plt.subplots(1, 3, figsize=(14, 4))
-
-    # Panel 1: distribution of rank-biserial correlations
-    ax = axes[0]
-    rbc = ranksum_df["rank_biserial_r"].dropna()
+def _ranksum_panel1(ax, rbc):
+    t, p = ttest_1samp(rbc.dropna(), 0)
     ax.hist(rbc, bins=60, color="#1f77b4", alpha=0.7, edgecolor="none")
     ax.axvline(0, color="grey", linewidth=1, linestyle="--")
-    ax.axvline(rbc.mean(), color="#d62728", linewidth=1.5, linestyle="-",
+    ax.axvline(rbc.mean(), color="#d62728", linewidth=1.5,
                label=f"mean = {rbc.mean():.4f}")
-    # One-sample t-test against 0
-    t, p = ttest_1samp(rbc.dropna(), 0)
-    ax.set_title(f"Rank-biserial correlation\n(paralogs vs non-paralogs)\np={p:.2e}",
-                 fontsize=9)
+    ax.set_title(f"Rank-biserial correlation\n(paralogs vs non-paralogs)\np={p:.2e}", fontsize=9)
     ax.set_xlabel("Rank-biserial r", fontsize=8)
     ax.set_ylabel("Number of KD genes", fontsize=8)
     ax.legend(fontsize=7)
+    sns.despine(ax=ax)
 
-    # Panel 2: Δz median paralog vs non-paralog (paired)
-    ax = axes[1]
-    delta = ranksum_df["delta_median"].dropna()
+def _ranksum_panel2(ax, delta):
+    t2, p2 = ttest_1samp(delta.dropna(), 0)
     ax.hist(delta, bins=60, color="#2ca02c", alpha=0.7, edgecolor="none")
     ax.axvline(0, color="grey", linewidth=1, linestyle="--")
     ax.axvline(delta.mean(), color="#d62728", linewidth=1.5,
                label=f"mean = {delta.mean():.4f}")
-    t2, p2 = ttest_1samp(delta.dropna(), 0)
-    ax.set_title(f"Median Δz: paralogs − non-paralogs\np={p2:.2e}", fontsize=9)
-    ax.set_xlabel("Δ median Δz", fontsize=8)
+    ax.set_title(f"Median Dz: paralogs - non-paralogs\np={p2:.2e}", fontsize=9)
+    ax.set_xlabel("Delta median Dz", fontsize=8)
     ax.set_ylabel("Number of KD genes", fontsize=8)
     ax.legend(fontsize=7)
+    sns.despine(ax=ax)
 
-    # Panel 3: effect size vs number of paralogs
-    ax = axes[2]
+def _ranksum_panel3(ax, ranksum_df):
     ax.scatter(ranksum_df["n_paralogs"], ranksum_df["rank_biserial_r"],
                s=4, alpha=0.3, color="#1f77b4", linewidths=0)
     ax.axhline(0, color="grey", linewidth=1, linestyle="--")
@@ -405,6 +396,18 @@ def plot_ranksum(ranksum_df: pd.DataFrame, cell_line: str,
     ax.set_ylabel("Rank-biserial r", fontsize=8)
     ax.set_title("Effect size vs paralog count", fontsize=9)
     sns.despine(ax=ax)
+
+
+def plot_ranksum(ranksum_df: pd.DataFrame, cell_line: str,
+                 figures_dir: Path) -> None:
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+
+    rbc   = ranksum_df["rank_biserial_r"].dropna()
+    delta = ranksum_df["delta_median"].dropna()
+
+    _ranksum_panel1(axes[0], rbc)
+    _ranksum_panel2(axes[1], delta)
+    _ranksum_panel3(axes[2], ranksum_df)
 
     fig.suptitle(
         f"Genome-wide paralog compensation test — {cell_line}\n"
@@ -417,27 +420,36 @@ def plot_ranksum(ranksum_df: pd.DataFrame, cell_line: str,
     plt.close()
     print(f"Saved {out}")
 
+    # Save each panel individually
+    panel_specs = [
+        ("20_ranksum_panel1_rbc.pdf",         _ranksum_panel1, (rbc,)),
+        ("20_ranksum_panel2_median_dz.pdf",   _ranksum_panel2, (ranksum_df["delta_median"].dropna(),)),
+        ("20_ranksum_panel3_scatter.pdf",     _ranksum_panel3, (ranksum_df,)),
+    ]
+    for fname, fn, args_p in panel_specs:
+        fig_p, ax_p = plt.subplots(figsize=(5, 4))
+        fn(ax_p, *args_p)
+        plt.tight_layout()
+        fig_p.savefig(figures_dir / fname, bbox_inches="tight", dpi=150)
+        plt.close()
+        print(f"Saved {figures_dir / fname}")
 
-def plot_upregulated_enrichment(up_df: pd.DataFrame, cell_line: str,
-                                figures_dir: Path) -> None:
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
 
-    # Panel 1: distribution of delta fraction
-    ax = axes[0]
+def _upregulated_panel1(ax, up_df):
     delta = up_df["delta_frac"].dropna()
+    t, p = ttest_1samp(delta, 0)
     ax.hist(delta, bins=60, color="#9467bd", alpha=0.7, edgecolor="none")
     ax.axvline(0, color="grey", linewidth=1, linestyle="--")
     ax.axvline(delta.mean(), color="#d62728", linewidth=1.5,
                label=f"mean = {delta.mean():.4f}")
-    t, p = ttest_1samp(delta, 0)
     ax.set_title(f"Fraction paralogs up − fraction others up\np={p:.2e}", fontsize=9)
     ax.set_xlabel("Delta fraction upregulated (Dz > 0)", fontsize=8)
     ax.set_ylabel("Number of KD genes", fontsize=8)
     ax.legend(fontsize=7)
     sns.despine(ax=ax)
 
-    # Panel 2: mean bar comparison
-    ax = axes[1]
+
+def _upregulated_panel2(ax, up_df, cell_line):
     means = [up_df["frac_para_up"].mean(), up_df["frac_other_up"].mean()]
     sems  = [up_df["frac_para_up"].sem(),  up_df["frac_other_up"].sem()]
     ax.bar(["Paralogs", "Non-paralogs"], means, yerr=sems,
@@ -449,9 +461,17 @@ def plot_upregulated_enrichment(up_df: pd.DataFrame, cell_line: str,
     ax.set_ylim(0, max(means) * 1.3)
     sns.despine(ax=ax)
 
+
+def plot_upregulated_enrichment(up_df: pd.DataFrame, cell_line: str,
+                                figures_dir: Path) -> None:
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    _upregulated_panel1(axes[0], up_df)
+    _upregulated_panel2(axes[1], up_df, cell_line)
+
     fig.suptitle(
         f"Paralog enrichment among upregulated genes — {cell_line}\n"
-        f"n = {len(delta):,} KD genes",
+        f"n = {len(up_df):,} KD genes",
         fontsize=10, fontweight="bold"
     )
     plt.tight_layout()
@@ -459,6 +479,18 @@ def plot_upregulated_enrichment(up_df: pd.DataFrame, cell_line: str,
     fig.savefig(out, bbox_inches="tight", dpi=150)
     plt.close()
     print(f"Saved {out}")
+
+    panel_specs = [
+        ("20_upregulated_panel1_delta_frac.pdf", _upregulated_panel1, (up_df,)),
+        ("20_upregulated_panel2_bar.pdf",        _upregulated_panel2, (up_df, cell_line)),
+    ]
+    for fname, fn, args_p in panel_specs:
+        fig_p, ax_p = plt.subplots(figsize=(5, 4))
+        fn(ax_p, *args_p)
+        plt.tight_layout()
+        fig_p.savefig(figures_dir / fname, bbox_inches="tight", dpi=150)
+        plt.close()
+        print(f"Saved {figures_dir / fname}")
 
 
 ESSENTIAL_GENES_URL = (
