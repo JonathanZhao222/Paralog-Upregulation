@@ -830,7 +830,7 @@ def main() -> None:
 
     if args.expr_floor is not None:
         ctrl_series = pd.Series(ctrl_vec, index=gene_names)
-        expressed   = ctrl_series[ctrl_series >= args.expr_floor].index
+        expressed   = set(ctrl_series[ctrl_series >= args.expr_floor].index)
         before      = dz_df.shape[1]
         dz_df       = dz_df[[g for g in dz_df.columns if g in expressed]]
         print(f"  Expression floor (ctrl z >= {args.expr_floor}): "
